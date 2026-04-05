@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kanban Reclutamiento</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet"/>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f8fafc;
+            color: #1e293b;
+            padding: 20px;
+        }
+        
+        .kanban-container { display: flex; gap: 20px; overflow-x: auto; padding-bottom: 20px; align-items: flex-start; }
+        .kanban-column { background: #f8fafc; border-radius: 16px; min-width: 320px; width: 320px; padding: 12px; }
+        .kanban-column-header { font-weight: 600; padding: 8px 4px 12px; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; display: flex; justify-content: space-between; }
+        .kanban-card { background: white; border-radius: 12px; padding: 14px; margin-bottom: 12px; cursor: pointer; border: 1px solid #e2e8f0; transition: all 0.2s; }
+        .kanban-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .sortable-ghost { opacity: 0.4; background: #cbd5e1; }
+        
+        /* Vista lista con filtros */
+        .lista-container { background: white; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; }
+        .filtros-lista { padding: 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+        .filtro-group { display: flex; flex-direction: column; gap: 4px; }
+        .filtro-group label { font-size: 0.7rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
+        .filtro-group input, .filtro-group select { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem; min-width: 150px; }
+        .btn-limpiar { background: #e2e8f0; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; }
+        
+        .lista-table { width: 100%; border-collapse: collapse; }
+        .lista-table th { background: #f8fafc; padding: 12px 16px; text-align: left; font-size: 0.75rem; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0; }
+        .lista-table td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; vertical-align: middle; }
+        .lista-table tr:hover { background: #f8fafc; cursor: pointer; }
+        
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 500; }
+        .score-high { background: #d1fae5; color: #065f46; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .score-mid { background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .score-low { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .skill-tag { background: #f1f5f9; padding: 2px 6px; border-radius: 10px; font-size: 10px; display: inline-block; margin: 2px; }
+        
+        .kanban-header {
+            background: white; padding: 20px; border-radius: 16px; margin-bottom: 20px;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+            border: 1px solid #e2e8f0;
+        }
+        .kanban-header h2 { margin: 0; font-size: 1.5rem; font-weight: 700; }
+        .kanban-header select, .kanban-header button {
+            padding: 10px 16px; border-radius: 8px; border: 1px solid #e2e8f0;
+            background: white; font-size: 14px; cursor: pointer;
+        }
+        .kanban-header button { background: #2563eb; color: white; border: none; }
+        .kanban-header button:hover { background: #1d4ed8; }
+        .view-toggle { display: flex; gap: 8px; background: #f1f5f9; padding: 4px; border-radius: 12px; }
+        .view-btn { padding: 8px 20px; border-radius: 8px; cursor: pointer; background: transparent; border: none; font-weight: 500; }
+        .view-btn.active { background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); color: #2563eb; }
+        
+        /* Modal - MISMO ESTILO QUE LA PANTALLA PRINCIPAL */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px);
+            display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;
+        }
+        .modal-professional {
+            background: white; border-radius: 16px; max-width: 800px; width: 100%;
+            max-height: 90vh; overflow-y: auto; position: relative;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+        .modal-close {
+            position: absolute; top: 1rem; right: 1rem;
+            background: transparent; border: none; font-size: 1.5rem; color: #94a3b8;
+            cursor: pointer; width: 2rem; height: 2rem; border-radius: 6px;
+        }
+        .modal-close:hover { background: #f1f5f9; }
+        .modal-header { padding: 1.5rem; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; background: white; }
+        .modal-header h2 { font-size: 1.3rem; font-weight: 700; }
+        .modal-body { padding: 1.5rem; }
+        .modal-footer { padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 12px; background: #f8fafc; }
+        
+        .btn-outline { background: transparent; border: 1px solid #e2e8f0; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; }
+        .btn-primary { background: #2563eb; color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; }
+        
+        /* Estilos de la ficha (igual que App.css) */
+        .ia-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+        .ia-item { background: #f8fafc; padding: 0.75rem; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .ia-label { font-size: 0.7rem; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 0.25rem; }
+        .ia-text { font-size: 0.95rem; line-height: 1.6; color: #334155; }
+        .ia-perfil-container { margin-bottom: 1.5rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border-left: 4px solid #2563eb; }
+        .ia-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+        .ia-list { margin: 0.5rem 0 0 1.5rem; }
+        .tag-industria, .tag-habilidad, .tag-empresa, .tag-certificacion { padding: 0.3rem 0.8rem; border-radius: 20px; font-size: 0.75rem; display: inline-block; margin: 2px; }
+        .tag-industria { background: #e0f2fe; color: #0369a1; }
+        .tag-habilidad { background: #f3e8ff; color: #6b21a8; }
+        .tag-empresa { background: #e6f7ff; color: #0066cc; border: 1px solid #bae7ff; }
+        .badge-sector { background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+        .badge-experiencia { background: #f1f5f9; color: #475569; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; }
+        .badge-senior { background: #dcfce7; color: #166534; }
+        .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+        .info-grid > div { background: white; padding: 0.75rem; border-radius: 6px; border: 1px solid #e2e8f0; }
+        .info-grid label { font-size: 0.7rem; font-weight: 600; color: #64748b; text-transform: uppercase; display: block; }
+        .score-display { display: flex; align-items: baseline; gap: 0.5rem; }
+        .score-value { font-size: 1.5rem; font-weight: 700; }
+        .score-80 { color: #16a34a; } .score-60 { color: #2563eb; } .score-40 { color: #ca8a04; } .score-20 { color: #dc2626; }
+        .criterio { font-size: 0.9rem; font-weight: 500; color: #475569; padding: 0.4rem 1rem; background: white; border-radius: 20px; border: 1px solid #e2e8f0; }
+        
+        .form-group { margin-bottom: 16px; }
+        .form-group label { font-size: 0.75rem; font-weight: 600; color: #64748b; margin-bottom: 4px; display: block; }
+        .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit; }
+        .notas-display { background: #fef3c7; padding: 12px; border-radius: 8px; margin-top: 8px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="kanban-header">
+        <h2>🎯 Pipeline de Reclutamiento</h2>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <select id="puestoSelect"></select>
+            <div class="view-toggle">
+                <button class="view-btn active" onclick="cambiarVista('kanban')">📋 Kanban</button>
+                <button class="view-btn" onclick="cambiarVista('lista')">📄 Lista</button>
+            </div>
+            <button onclick="cargarDatos()">Cargar</button>
+            <button onclick="abrirConfiguracion()" style="background:#8b5cf6;">⚙️ Configurar</button>
+        </div>
+    </div>
+
+    <div id="kanban-view" class="kanban-container"></div>
+    
+    <div id="lista-view" style="display: none;">
+        <div class="filtros-lista">
+            <div class="filtro-group"><label>🔍 Buscar</label><input type="text" id="filtroNombre" placeholder="Nombre o profesión" oninput="aplicarFiltrosLista()"></div>
+            <div class="filtro-group"><label>⭐ Etapa</label><select id="filtroEtapa" onchange="aplicarFiltrosLista()"><option value="">Todas</option></select></div>
+            <div class="filtro-group"><label>🎯 Score mínimo</label><input type="number" id="filtroScore" placeholder="50" oninput="aplicarFiltrosLista()"></div>
+            <div class="filtro-group"><label>🛠️ Habilidad</label><input type="text" id="filtroHabilidad" placeholder="Python, Java..." oninput="aplicarFiltrosLista()"></div>
+            <button class="btn-limpiar" onclick="limpiarFiltrosLista()">Limpiar</button>
+        </div>
+        <div class="lista-container" id="lista-container"></div>
+    </div>
+
+    <!-- Modal Ficha COMPLETO (igual que pantalla principal) -->
+    <div id="modalFicha" class="modal-overlay" style="display: none;">
+        <div class="modal-professional">
+            <button class="modal-close" onclick="cerrarFicha()">×</button>
+            <div class="modal-header">
+                <div>
+                    <h2 id="fichaNombre">Candidato</h2>
+                    <p id="fichaProfesion"></p>
+                </div>
+                <button id="btnVerCV" class="btn-outline" onclick="verCV()">📄 Ver CV</button>
+            </div>
+            <div class="modal-body" id="fichaContenido"></div>
+            <div class="modal-footer">
+                <button class="btn-outline" onclick="cerrarFicha()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configuración -->
+    <div id="modalConfig" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000;">
+        <div style="background:white; border-radius:20px; padding:24px; max-width:500px; width:90%;">
+            <h3>⚙️ Configuración de Etapas</h3>
+            <div id="listaEtapas" style="margin:16px 0;"></div>
+            <button onclick="cerrarModal()" style="background:#e2e8f0; padding:8px 16px; border-radius:10px; border:none; cursor:pointer;">Cerrar</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5001/api';
+        let etapas = [];
+        let candidatos = [];
+        let puestoActual = null;
+        let vistaActual = 'kanban';
+        let sortableInstances = [];
+        let candidatoSeleccionado = null;
+
+        function safeParseRawData(data) {
+            if (!data) return {};
+            if (typeof data === 'string') {
+                try { return JSON.parse(data); } catch(e) { return {}; }
+            }
+            return data;
+        }
+
+        async function cargarPuestos() {
+            try {
+                const res = await axios.get(`${API_URL}/puestos`);
+                const select = document.getElementById('puestoSelect');
+                select.innerHTML = '<option value="">-- Seleccionar puesto --</option>';
+                if (res.data.success && res.data.puestos) {
+                    res.data.puestos.forEach(p => {
+                        select.innerHTML += `<option value="${p.id}">${p.cliente} - ${p.titulo}</option>`;
+                    });
+                }
+            } catch (error) { console.error('Error:', error); }
+        }
+
+        async function cargarDatos() {
+            const puestoId = document.getElementById('puestoSelect').value;
+            if (!puestoId) { alert('Selecciona un puesto'); return; }
+            puestoActual = puestoId;
+            
+            try {
+                const res = await axios.get(`${API_URL}/kanban/candidatos/${puestoId}`);
+                if (res.data.success) {
+                    etapas = res.data.etapas || [];
+                    candidatos = res.data.candidatos || [];
+                    actualizarSelectEtapas();
+                    if (vistaActual === 'kanban') renderKanban();
+                    else renderLista();
+                }
+            } catch (error) { console.error('Error:', error); }
+        }
+
+        function actualizarSelectEtapas() {
+            const select = document.getElementById('filtroEtapa');
+            select.innerHTML = '<option value="">Todas</option>';
+            etapas.forEach(e => select.innerHTML += `<option value="${e.id}">${e.nombre}</option>`);
+        }
+
+        function renderKanban() {
+            const container = document.getElementById('kanban-view');
+            if (!etapas.length) { container.innerHTML = '<div style="text-align:center; padding:40px;">No hay etapas</div>'; return; }
+            
+            let html = '';
+            for (const etapa of etapas) {
+                const cards = candidatos.filter(c => c.etapa_id === etapa.id);
+                html += `
+                    <div class="kanban-column" data-etapa-id="${etapa.id}">
+                        <div class="kanban-column-header"><span>${etapa.nombre}</span><span class="badge" style="background:#e2e8f0;">${cards.length}</span></div>
+                        <div class="cards-container" data-etapa="${etapa.id}">
+                            ${cards.map(c => `
+                                <div class="kanban-card" data-candidato-id="${c.id}" onclick="verFicha(${c.id})">
+                                    <div style="display:flex; justify-content:space-between;"><strong>${c.nombre || 'Candidato'}</strong><span class="${c.score >= 70 ? 'score-high' : (c.score >= 50 ? 'score-mid' : 'score-low')}">${c.score || 0}%</span></div>
+                                    <div style="font-size:12px; color:#666; margin:6px 0;">${c.profesion || ''}</div>
+                                    <div>${(c.habilidades || []).slice(0, 3).map(h => `<span class="skill-tag">${h}</span>`).join('')}</div>
+                                    ${c.notas ? `<div style="font-size:10px; color:#f59e0b; margin-top:6px;">📝 ${c.notas.substring(0, 40)}${c.notas.length > 40 ? '...' : ''}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+            iniciarDragDrop();
+        }
+
+        function iniciarDragDrop() {
+            sortableInstances.forEach(s => s.destroy());
+            sortableInstances = [];
+            etapas.forEach(etapa => {
+                const container = document.querySelector(`.cards-container[data-etapa="${etapa.id}"]`);
+                if (container) {
+                    const sortable = new Sortable(container, {
+                        group: { name: 'kanban', pull: true, revertClone: false, put: true },
+                        animation: 200,
+                        ghostClass: 'sortable-ghost',
+                        onEnd: async (evt) => {
+                            const cardId = evt.item.getAttribute('data-candidato-id');
+                            const nuevaEtapaId = parseInt(evt.to.parentElement.getAttribute('data-etapa-id'));
+                            const candidato = candidatos.find(c => c.id == cardId);
+                            if (candidato && candidato.etapa_id !== nuevaEtapaId) {
+                                const comentario = prompt('Agrega un comentario:');
+                                await moverCandidato(cardId, nuevaEtapaId, comentario || '');
+                                await cargarDatos();
+                            }
+                        }
+                    });
+                    sortableInstances.push(sortable);
+                }
+            });
+        }
+
+        function renderLista() {
+            aplicarFiltrosLista();
+        }
+
+        function aplicarFiltrosLista() {
+            const filtroNombre = document.getElementById('filtroNombre').value.toLowerCase();
+            const filtroEtapa = document.getElementById('filtroEtapa').value;
+            const filtroScore = parseInt(document.getElementById('filtroScore').value) || 0;
+            const filtroHabilidad = document.getElementById('filtroHabilidad').value.toLowerCase();
+            
+            let filtrados = candidatos.filter(c => {
+                if (filtroNombre && !(c.nombre?.toLowerCase().includes(filtroNombre) || c.profesion?.toLowerCase().includes(filtroNombre))) return false;
+                if (filtroEtapa && c.etapa_id != filtroEtapa) return false;
+                if (filtroScore > 0 && (c.score || 0) < filtroScore) return false;
+                if (filtroHabilidad && !(c.habilidades || []).some(h => h.toLowerCase().includes(filtroHabilidad))) return false;
+                return true;
+            });
+            
+            const container = document.getElementById('lista-container');
+            if (!filtrados.length) { container.innerHTML = '<div style="text-align:center; padding:40px;">No hay candidatos</div>'; return; }
+            
+            let html = `
+                <table class="lista-table">
+                    <thead><tr><th>Candidato</th><th>Profesión</th><th>Etapa</th><th>Score</th><th>Habilidades</th><th>Notas</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                        ${filtrados.map(c => `
+                            <tr onclick="verFicha(${c.id})">
+                                <td><strong>${c.nombre || 'Candidato'}</strong></td>
+                                <td>${c.profesion || ''}</td>
+                                <td><select onclick="event.stopPropagation()" onchange="cambiarEtapaRapido(${c.id}, this.value)" style="padding:4px 8px; border-radius:6px; border:1px solid #e2e8f0;">${etapas.map(e => `<option value="${e.id}" ${e.id === c.etapa_id ? 'selected' : ''}>${e.nombre}</option>`).join('')}</select></td>
+                                <td><span class="${c.score >= 70 ? 'score-high' : (c.score >= 50 ? 'score-mid' : 'score-low')}">${c.score || 0}%</span></td>
+                                <td>${(c.habilidades || []).slice(0, 2).join(', ')}${(c.habilidades || []).length > 2 ? '...' : ''}</td>
+                                <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.notas ? `📝 ${c.notas.substring(0, 30)}${c.notas.length > 30 ? '...' : ''}` : '-'}</td>
+                                <td><button onclick="event.stopPropagation(); verFicha(${c.id})" style="background:#2563eb; color:white; border:none; padding:4px 12px; border-radius:6px; cursor:pointer;">Ver</button></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            container.innerHTML = html;
+        }
+
+        function limpiarFiltrosLista() {
+            document.getElementById('filtroNombre').value = '';
+            document.getElementById('filtroEtapa').value = '';
+            document.getElementById('filtroScore').value = '';
+            document.getElementById('filtroHabilidad').value = '';
+            aplicarFiltrosLista();
+        }
+
+        async function moverCandidato(candidatoProcesoId, nuevaEtapaId, comentario) {
+            try {
+                await axios.post(`${API_URL}/kanban/mover`, {
+                    candidato_proceso_id: candidatoProcesoId,
+                    nueva_etapa_id: nuevaEtapaId,
+                    comentario: comentario,
+                    usuario: 'reclutador'
+                });
+            } catch (error) { console.error('Error:', error); alert('Error al mover candidato'); }
+        }
+
+        async function cambiarEtapaRapido(candidatoProcesoId, nuevaEtapaId) {
+            const candidato = candidatos.find(c => c.id == candidatoProcesoId);
+            if (candidato && candidato.etapa_id != nuevaEtapaId) {
+                const comentario = prompt(`Cambiar etapa de "${candidato.nombre}"?`);
+                await moverCandidato(candidatoProcesoId, parseInt(nuevaEtapaId), comentario || '');
+                await cargarDatos();
+            }
+        }
+
+        async function verFicha(candidatoProcesoId) {
+            const candidato = candidatos.find(c => c.id === candidatoProcesoId);
+            if (!candidato) return;
+            
+            try {
+                const res = await axios.get(`${API_URL}/candidates`);
+                const fullCandidato = res.data.data.find(c => c.id === candidato.candidato_id);
+                candidatoSeleccionado = { ...candidato, fullData: fullCandidato };
+                renderizarFichaCompleta(candidatoSeleccionado);
+            } catch (error) { renderizarFichaCompleta(candidato); }
+            document.getElementById('modalFicha').style.display = 'flex';
+        }
+
+        function renderizarFichaCompleta(candidato) {
+            const datos = safeParseRawData(candidato.fullData?.raw_data || {});
+            const interpretacion = datos.interpretacion || {};
+            const datosCrudos = datos.datos_crudos || {};
+            const score = datos.score || candidato.score || 0;
+            const scoreClass = score >= 80 ? 'score-80' : (score >= 60 ? 'score-60' : (score >= 40 ? 'score-40' : 'score-20'));
+            
+            document.getElementById('fichaNombre').innerHTML = datosCrudos.nombre || candidato.nombre || 'Candidato';
+            document.getElementById('fichaProfesion').innerHTML = datosCrudos.profesion_escrita || '';
+            
+            let html = `
+                <div class="form-group">
+                    <label>📌 Cambiar etapa</label>
+                    <select id="selectEtapa" onchange="cambiarEtapaDesdeFicha(${candidato.id})" style="width:100%;">
+                        ${etapas.map(e => `<option value="${e.id}" ${e.id === candidato.etapa_id ? 'selected' : ''}>${e.nombre}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>📝 Notas del reclutador</label>
+                    <textarea id="notasCandidato" rows="3" placeholder="Agrega notas sobre el candidato...">${candidato.notas || ''}</textarea>
+                    <button onclick="guardarNotas(${candidato.id})" style="margin-top:8px; background:#10b981; color:white; border:none; padding:8px 16px; border-radius:8px; cursor:pointer;">💾 Guardar notas</button>
+                </div>
+                <div class="modal-section highlight">
+                    <h3>🤖 INTERPRETACIÓN IA</h3>
+                    <div class="ia-perfil-container"><div class="ia-label">📊 PERFIL INTERPRETADO</div><p class="ia-text">${interpretacion.perfil_interpretado || 'No disponible'}</p></div>
+                    <div class="ia-grid">
+                        <div class="ia-item"><div class="ia-label">🏭 SECTOR DEDUCIDO</div><span class="badge-sector">${interpretacion.sector_deducido || 'No inferido'}</span></div>
+                        <div class="ia-item"><div class="ia-label">📅 EXPERIENCIA DEDUCIDA</div><span class="badge-experiencia">${interpretacion.anos_experiencia_deducidos || 'No inferido'}</span></div>
+                        <div class="ia-item"><div class="ia-label">⭐ SENIORITY</div><span class="badge badge-senior">${interpretacion.seniority || 'No inferido'}</span></div>
+                        <div class="ia-item"><div class="ia-label">🏢 INDUSTRIA PRINCIPAL</div><span class="badge-sector">${interpretacion.industria_principal || 'No inferido'}</span></div>
+                    </div>
+            `;
+            
+            if (interpretacion.industrias_secundarias?.length > 0) {
+                html += `<div class="ia-section"><div class="ia-label">🏢 INDUSTRIAS SECUNDARIAS</div><div class="ia-tags">${interpretacion.industrias_secundarias.map(i => `<span class="tag-industria">${i}</span>`).join('')}</div></div>`;
+            }
+            
+            if (datosCrudos.empresas?.length > 0) {
+                html += `<div class="ia-section"><div class="ia-label">🏢 EMPRESAS DESTACADAS</div><div class="ia-tags">${datosCrudos.empresas.slice(0, 6).map(e => `<span class="tag-empresa">🏢 ${e}</span>`).join('')}</div></div>`;
+            }
+            
+            if (interpretacion.habilidades_clave?.length > 0) {
+                html += `<div class="ia-section"><div class="ia-label">🔑 HABILIDADES CLAVE</div><div class="ia-tags">${interpretacion.habilidades_clave.map(h => `<span class="tag-habilidad">⭐ ${h}</span>`).join('')}</div></div>`;
+            }
+            
+            html += `<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:1rem;">`;
+            if (interpretacion.fortalezas?.length > 0) {
+                html += `<div><div class="ia-label">💪 FORTALEZAS</div><ul class="ia-list">${interpretacion.fortalezas.map(f => `<li>${f}</li>`).join('')}</ul></div>`;
+            }
+            if (interpretacion.areas_mejora?.length > 0) {
+                html += `<div><div class="ia-label">📈 ÁREAS DE MEJORA</div><ul class="ia-list">${interpretacion.areas_mejora.map(a => `<li>${a}</li>`).join('')}</ul></div>`;
+            }
+            html += `</div>`;
+            
+            if (interpretacion.recomendacion) {
+                html += `<div style="padding:12px; background:#fef3c7; border-radius:12px; margin-bottom:1rem;"><div class="ia-label">🎯 RECOMENDACIÓN</div><div style="font-weight:500;">${interpretacion.recomendacion}</div></div>`;
+            }
+            
+            html += `<div class="modal-section"><h3>📄 DATOS DEL CV</h3><div class="info-grid">
+                <div><label>📞 Teléfono</label><span>${datosCrudos.telefono || '—'}</span></div>
+                <div><label>✉️ Email</label><span>${datosCrudos.email || '—'}</span></div>
+                <div><label>📍 Ubicación</label><span>${datosCrudos.ubicacion || '—'}</span></div>
+                <div><label>🎓 Carrera</label><span>${datosCrudos.profesion_escrita || '—'}</span></div>
+                <div><label>🏛️ Universidad</label><span>${datosCrudos.universidad || '—'}</span></div>
+                <div><label>📜 Grado</label><span>${datosCrudos.grado_academico || '—'}</span></div>
+            </div></div>`;
+            
+            if (datosCrudos.certificaciones?.length > 0) {
+                html += `<div><div class="ia-label">📜 Certificaciones</div><div class="ia-tags">${datosCrudos.certificaciones.map(c => `<span class="tag-certificacion">${c}</span>`).join('')}</div></div>`;
+            }
+            
+            document.getElementById('fichaContenido').innerHTML = html;
+        }
+
+        async function guardarNotas(candidatoProcesoId) {
+            const notas = document.getElementById('notasCandidato').value;
+            try {
+                await axios.post(`${API_URL}/kanban/actualizar-notas`, {
+                    candidato_proceso_id: candidatoProcesoId,
+                    notas: notas
+                });
+                alert('Notas guardadas');
+                await cargarDatos();
+            } catch (error) { alert('Error al guardar notas'); }
+        }
+
+        async function cambiarEtapaDesdeFicha(candidatoProcesoId) {
+            const nuevaEtapaId = document.getElementById('selectEtapa').value;
+            const candidato = candidatos.find(c => c.id == candidatoProcesoId);
+            if (candidato && candidato.etapa_id != nuevaEtapaId) {
+                await moverCandidato(candidatoProcesoId, parseInt(nuevaEtapaId), 'Cambio desde ficha');
+                await cargarDatos();
+                verFicha(candidatoProcesoId);
+            }
+        }
+
+        function verCV() {
+            if (candidatoSeleccionado?.fullData?.archivo) {
+                window.open(`${API_URL}/view-cv/${encodeURIComponent(candidatoSeleccionado.fullData.archivo)}`, '_blank');
+            } else { alert('No hay CV disponible'); }
+        }
+
+        function cerrarFicha() { document.getElementById('modalFicha').style.display = 'none'; }
+
+        function cambiarVista(vista) {
+            vistaActual = vista;
+            const kanbanView = document.getElementById('kanban-view');
+            const listaView = document.getElementById('lista-view');
+            const btns = document.querySelectorAll('.view-btn');
+            btns.forEach(btn => btn.classList.remove('active'));
+            
+            if (vista === 'kanban') {
+                kanbanView.style.display = 'flex';
+                listaView.style.display = 'none';
+                document.querySelector('.view-btn:first-child').classList.add('active');
+                if (etapas.length) renderKanban();
+            } else {
+                kanbanView.style.display = 'none';
+                listaView.style.display = 'block';
+                document.querySelector('.view-btn:last-child').classList.add('active');
+                if (candidatos.length) renderLista();
+            }
+        }
+
+        async function abrirConfiguracion() {
+            try {
+                const res = await axios.get(`${API_URL}/kanban/etapas`);
+                const lista = document.getElementById('listaEtapas');
+                lista.innerHTML = res.data.etapas.map(e => `<div style="display:flex; align-items:center; gap:8px; padding:8px; border-bottom:1px solid #e2e8f0;"><span style="width:12px; height:12px; border-radius:50%; background:${e.color};"></span><span>${e.nombre}</span><span style="margin-left:auto;">Orden: ${e.orden}</span></div>`).join('');
+                document.getElementById('modalConfig').style.display = 'flex';
+            } catch (error) { alert('Error cargando etapas'); }
+        }
+
+        function cerrarModal() { document.getElementById('modalConfig').style.display = 'none'; }
+
+        cargarPuestos();
+    </script>
+</body>
+</html>

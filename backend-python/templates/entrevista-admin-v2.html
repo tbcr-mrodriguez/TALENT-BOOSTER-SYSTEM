@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talent Pipeline - Administrar Plantillas STAR</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <style>
+        .star-badge { background: #fef3c7; color: #92400e; }
+        .fase-card { transition: all 0.2s; }
+        .fase-card:hover { border-color: #2563eb; }
+        .pregunta-item { background: #f8fafc; border-left: 4px solid #2563eb; }
+        .drag-handle { cursor: move; }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-7xl mx-auto">
+        
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">📋 Administrar Plantillas STAR</h1>
+            <p class="text-gray-600 mt-2">Crea entrevistas estructuradas por competencias con método STAR</p>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-6 border-b">
+            <button class="tab-btn active px-4 py-2 text-blue-600 border-b-2 border-blue-600" data-tab="lista">📋 Mis Plantillas</button>
+            <button class="tab-btn px-4 py-2 text-gray-600" data-tab="crear">✨ Crear Nueva Plantilla</button>
+            <button class="tab-btn px-4 py-2 text-gray-600" data-tab="cargar">📂 Cargar desde Archivo</button>
+        </div>
+
+        <!-- Panel: Lista de Plantillas -->
+        <div id="tab-lista" class="tab-panel">
+            <div id="plantillas-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div class="col-span-3 text-center py-12 text-gray-500">Cargando plantillas...</div>
+            </div>
+        </div>
+
+        <!-- Panel: Crear Plantilla -->
+        <div id="tab-crear" class="tab-panel hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6">
+                <h2 class="text-xl font-bold mb-4">✨ Nueva Plantilla STAR</h2>
+                
+                <form id="formPlantilla">
+                    <!-- Datos básicos -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Nombre de la plantilla *</label>
+                            <input type="text" id="nombrePlantilla" class="w-full border rounded-lg p-2" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                            <select id="tipoPlantilla" class="w-full border rounded-lg p-2">
+                                <option value="generica">📋 Genérica (Conocer al candidato)</option>
+                                <option value="especifica">🎯 Específica para puesto</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Descripción y Objetivo -->
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción de la entrevista</label>
+                        <textarea id="descripcionPlantilla" rows="2" class="w-full border rounded-lg p-2" placeholder="¿Qué se busca evaluar con esta entrevista?"></textarea>
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Objetivo general</label>
+                        <textarea id="objetivoPlantilla" rows="2" class="w-full border rounded-lg p-2" placeholder="Ej: Evaluar experiencia técnica y habilidades de liderazgo para puesto de Tech Lead"></textarea>
+                    </div>
+
+                    <!-- Perfil del puesto (para tipo específica) -->
+                    <div id="seccionPuesto" class="mb-6 border-t pt-4 hidden">
+                        <h3 class="font-semibold text-lg mb-3">🎯 Perfil del Puesto</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Título del puesto</label>
+                                <input type="text" id="puestoTitulo" class="w-full border rounded-lg p-2">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Seniority</label>
+                                <select id="puestoSeniority" class="w-full border rounded-lg p-2">
+                                    <option value="">Seleccionar...</option>
+                                    <option value="junior">Junior</option>
+                                    <option value="semi-senior">Semi-Senior</option>
+                                    <option value="senior">Senior</option>
+                                    <option value="lead">Lead / Manager</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Responsabilidades clave</label>
+                            <textarea id="puestoResponsabilidades" rows="3" class="w-full border rounded-lg p-2" placeholder="Una por línea"></textarea>
+                        </div>
+                        <div class="mt-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Requisitos obligatorios</label>
+                            <textarea id="puestoRequisitos" rows="3" class="w-full border rounded-lg p-2" placeholder="Una por línea"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Cultura de la empresa -->
+                    <div id="seccionCultura" class="mb-6 border-t pt-4">
+                        <h3 class="font-semibold text-lg mb-3">🏢 Cultura de la Empresa</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Valores</label>
+                                <textarea id="culturaValores" rows="2" class="w-full border rounded-lg p-2" placeholder="Ej: Innovación, Colaboración, Excelencia"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Ambiente de trabajo</label>
+                                <textarea id="culturaAmbiente" rows="2" class="w-full border rounded-lg p-2" placeholder="Ej: Dinámico, flexible, orientado a resultados"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Configuración Anti-Trampas -->
+                    <div class="border-t pt-4 mb-6">
+                        <h3 class="font-semibold text-lg mb-3">🛡️ Configuración Anti-Trampas</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">🚨 Máximo de advertencias</label>
+                                <select id="max_advertencias" class="w-full border rounded-lg p-2">
+                                    <option value="1">1 - Muy estricto</option>
+                                    <option value="2">2 - Estricto</option>
+                                    <option value="3" selected>3 - Normal</option>
+                                    <option value="4">4 - Permisivo</option>
+                                    <option value="5">5 - Muy permisivo</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Infracciones antes de expulsar</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">🔄 Intentos por pregunta</label>
+                                <select id="intentos_por_pregunta" class="w-full border rounded-lg p-2">
+                                    <option value="1">1 intento</option>
+                                    <option value="2" selected>2 intentos</option>
+                                    <option value="3">3 intentos</option>
+                                    <option value="4">4 intentos</option>
+                                    <option value="5">5 intentos</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Veces que puede repetir una pregunta</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">⏱️ Tiempo de instrucciones</label>
+                                <input type="number" id="tiempo_instrucciones" value="60" class="w-full border rounded-lg p-2">
+                                <p class="text-xs text-gray-500 mt-1">Segundos para leer instrucciones</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fases y Preguntas -->
+                    <div class="border-t pt-4">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-semibold text-lg">📝 Fases y Preguntas STAR</h3>
+                            <button type="button" onclick="agregarFase()" class="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm">+ Agregar Fase</button>
+                        </div>
+                        <div id="fases-container" class="space-y-4">
+                            <!-- Fases se agregan dinámicamente -->
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-3 mt-6 pt-4 border-t">
+                        <button type="button" onclick="limpiarFormulario()" class="px-4 py-2 bg-gray-200 rounded-lg">Cancelar</button>
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Guardar Plantilla</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Panel: Cargar desde Archivo -->
+        <div id="tab-cargar" class="tab-panel hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6">
+                <h2 class="text-xl font-bold mb-4">📂 Cargar Plantilla desde Archivo</h2>
+                <p class="text-gray-600 mb-4">Sube un archivo JSON con la estructura de la plantilla</p>
+                
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                    <input type="file" id="filePlantilla" accept=".json" class="hidden">
+                    <button onclick="document.getElementById('filePlantilla').click()" class="px-4 py-2 bg-gray-200 rounded-lg">
+                        📁 Seleccionar archivo JSON
+                    </button>
+                    <p id="nombreArchivo" class="text-sm text-gray-500 mt-2"></p>
+                </div>
+
+                <div class="mt-6">
+                    <h3 class="font-semibold mb-2">📄 Ejemplo de formato JSON:</h3>
+                    <pre class="bg-gray-900 text-green-400 p-4 rounded-lg text-xs overflow-x-auto"><code>{
+  "nombre": "Entrevista Desarrollador Senior",
+  "tipo": "especifica",
+  "descripcion": "Evaluación técnica y conductual",
+  "objetivo": "Seleccionar desarrollador senior para equipo backend",
+  "max_advertencias": 3,
+  "intentos_por_pregunta": 2,
+  "tiempo_instrucciones": 60,
+  "perfil_puesto": {
+    "titulo": "Desarrollador Senior Backend",
+    "seniority": "senior",
+    "responsabilidades": ["Diseñar APIs", "Liderar equipo técnico"],
+    "requisitos": ["5+ años Python", "Experiencia con AWS"]
+  },
+  "cultura_empresa": {
+    "valores": ["Innovación", "Colaboración"],
+    "ambiente": "Ágil, remoto"
+  },
+  "fases": [
+    {
+      "nombre": "Experiencia Profesional",
+      "descripcion": "Evaluar trayectoria y logros",
+      "preguntas": [
+        {
+          "pregunta": "Cuéntame sobre un proyecto desafiante que hayas liderado",
+          "objetivo": "Evaluar capacidad de liderazgo",
+          "criterio_star": "Situación: contexto del proyecto, Tarea: tu rol, Acción: pasos tomados, Resultado: impacto",
+          "competencia": "Liderazgo"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal de Vista Previa -->
+        <div id="modalPreview" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden p-4">
+            <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+                    <h3 class="text-xl font-bold" id="previewTitulo">Vista Previa</h3>
+                    <button onclick="cerrarModal()" class="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+                </div>
+                <div id="previewContenido" class="p-6"></div>
+                <div class="sticky bottom-0 bg-white border-t px-6 py-4 flex justify-end">
+                    <button onclick="cerrarModal()" class="px-4 py-2 bg-gray-200 rounded-lg">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fases = [];
+        let faseCounter = 0;
+
+        // Tab navigation
+        $('.tab-btn').click(function() {
+            const tab = $(this).data('tab');
+            $('.tab-btn').removeClass('active text-blue-600 border-b-2 border-blue-600').addClass('text-gray-600');
+            $(this).addClass('active text-blue-600 border-b-2 border-blue-600');
+            $('.tab-panel').addClass('hidden');
+            $(`#tab-${tab}`).removeClass('hidden');
+            
+            if (tab === 'lista') cargarPlantillas();
+        });
+
+        // Mostrar/ocultar sección de puesto según tipo
+        $('#tipoPlantilla').change(function() {
+            if ($(this).val() === 'especifica') {
+                $('#seccionPuesto').removeClass('hidden');
+            } else {
+                $('#seccionPuesto').addClass('hidden');
+            }
+        });
+
+        function agregarFase() {
+            const faseId = faseCounter++;
+            fases.push({ id: faseId, nombre: '', descripcion: '', preguntas: [] });
+            renderizarFases();
+        }
+
+        function eliminarFase(faseId) {
+            fases = fases.filter(f => f.id !== faseId);
+            renderizarFases();
+        }
+
+        function agregarPregunta(faseId) {
+            const fase = fases.find(f => f.id === faseId);
+            if (fase) {
+                fase.preguntas.push({
+                    id: Date.now(),
+                    pregunta: '',
+                    objetivo: '',
+                    criterio_star: '',
+                    competencia: '',
+                    peso: 1
+                });
+                renderizarFases();
+            }
+        }
+
+        function eliminarPregunta(faseId, preguntaId) {
+            const fase = fases.find(f => f.id === faseId);
+            if (fase) {
+                fase.preguntas = fase.preguntas.filter(p => p.id !== preguntaId);
+                renderizarFases();
+            }
+        }
+
+        function actualizarFase(faseId, campo, valor) {
+            const fase = fases.find(f => f.id === faseId);
+            if (fase) fase[campo] = valor;
+        }
+
+        function actualizarPregunta(faseId, preguntaId, campo, valor) {
+            const fase = fases.find(f => f.id === faseId);
+            if (fase) {
+                const pregunta = fase.preguntas.find(p => p.id === preguntaId);
+                if (pregunta) pregunta[campo] = valor;
+            }
+        }
+
+        function renderizarFases() {
+            const container = document.getElementById('fases-container');
+            container.innerHTML = '';
+            
+            fases.forEach((fase, idx) => {
+                const faseDiv = document.createElement('div');
+                faseDiv.className = 'border rounded-lg p-4 bg-gray-50';
+                faseDiv.innerHTML = `
+                    <div class="flex justify-between items-center mb-3">
+                        <input type="text" placeholder="Nombre de la fase (ej: Experiencia Profesional)" 
+                               value="${fase.nombre.replace(/"/g, '&quot;')}"
+                               onchange="actualizarFase(${fase.id}, 'nombre', this.value)"
+                               class="text-lg font-semibold bg-transparent border-b border-gray-300 focus:border-blue-500 outline-none w-64">
+                        <button onclick="eliminarFase(${fase.id})" class="text-red-500 hover:text-red-700">✕ Eliminar fase</button>
+                    </div>
+                    <textarea placeholder="Descripción de la fase" rows="2"
+                              onchange="actualizarFase(${fase.id}, 'descripcion', this.value)"
+                              class="w-full border rounded p-2 mb-3">${fase.descripcion}</textarea>
+                    
+                    <div class="mb-2 flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-600">Preguntas (${fase.preguntas.length})</span>
+                        <button onclick="agregarPregunta(${fase.id})" class="text-sm text-blue-600 hover:text-blue-800">+ Agregar pregunta</button>
+                    </div>
+                    <div class="space-y-2">
+                        ${fase.preguntas.map(p => `
+                            <div class="pregunta-item p-3 rounded-lg">
+                                <div class="flex justify-between items-start mb-2">
+                                    <input type="text" placeholder="Pregunta" 
+                                           value="${p.pregunta.replace(/"/g, '&quot;')}"
+                                           onchange="actualizarPregunta(${fase.id}, ${p.id}, 'pregunta', this.value)"
+                                           class="flex-1 bg-transparent border-b border-gray-300 focus:border-blue-500 outline-none mr-2">
+                                    <button onclick="eliminarPregunta(${fase.id}, ${p.id})" class="text-red-500 text-sm">✕</button>
+                                </div>
+                                <input type="text" placeholder="Objetivo de la pregunta (qué se busca evaluar)"
+                                       value="${p.objetivo.replace(/"/g, '&quot;')}"
+                                       onchange="actualizarPregunta(${fase.id}, ${p.id}, 'objetivo', this.value)"
+                                       class="w-full text-sm bg-transparent border-b border-gray-200 focus:border-blue-500 outline-none mb-2">
+                                <textarea placeholder="Criterio STAR (Situación, Tarea, Acción, Resultado esperado)" rows="2"
+                                          onchange="actualizarPregunta(${fase.id}, ${p.id}, 'criterio_star', this.value)"
+                                          class="w-full text-sm border rounded p-2">${p.criterio_star}</textarea>
+                                <div class="flex gap-2 mt-2">
+                                    <input type="text" placeholder="Competencia (ej: Liderazgo)"
+                                           value="${p.competencia.replace(/"/g, '&quot;')}"
+                                           onchange="actualizarPregunta(${fase.id}, ${p.id}, 'competencia', this.value)"
+                                           class="flex-1 text-sm border rounded p-1">
+                                    <select onchange="actualizarPregunta(${fase.id}, ${p.id}, 'peso', parseInt(this.value))"
+                                            class="text-sm border rounded p-1 w-20">
+                                        <option value="1" ${p.peso === 1 ? 'selected' : ''}>Peso 1</option>
+                                        <option value="2" ${p.peso === 2 ? 'selected' : ''}>Peso 2</option>
+                                        <option value="3" ${p.peso === 3 ? 'selected' : ''}>Peso 3</option>
+                                    </select>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                container.appendChild(faseDiv);
+            });
+            
+            if (fases.length === 0) {
+                container.innerHTML = '<div class="text-center py-8 text-gray-500 border-2 border-dashed rounded-lg">No hay fases. Haz clic en "Agregar Fase" para comenzar.</div>';
+            }
+        }
+
+        function limpiarFormulario() {
+            fases = [];
+            renderizarFases();
+            document.getElementById('formPlantilla').reset();
+            $('#seccionPuesto').addClass('hidden');
+            // Valores por defecto anti-trampas
+            document.getElementById('max_advertencias').value = '3';
+            document.getElementById('intentos_por_pregunta').value = '2';
+            document.getElementById('tiempo_instrucciones').value = '60';
+        }
+
+        // Guardar plantilla
+        document.getElementById('formPlantilla').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const plantilla = {
+                nombre: document.getElementById('nombrePlantilla').value,
+                tipo: document.getElementById('tipoPlantilla').value,
+                descripcion: document.getElementById('descripcionPlantilla').value,
+                objetivo: document.getElementById('objetivoPlantilla').value,
+                perfil_puesto: {
+                    titulo: document.getElementById('puestoTitulo').value,
+                    seniority: document.getElementById('puestoSeniority').value,
+                    responsabilidades: document.getElementById('puestoResponsabilidades').value.split('\n').filter(l => l.trim()),
+                    requisitos: document.getElementById('puestoRequisitos').value.split('\n').filter(l => l.trim())
+                },
+                cultura_empresa: {
+                    valores: document.getElementById('culturaValores').value.split(',').map(v => v.trim()),
+                    ambiente: document.getElementById('culturaAmbiente').value
+                },
+                // Configuración Anti-Trampas
+                max_advertencias: parseInt(document.getElementById('max_advertencias').value),
+                intentos_por_pregunta: parseInt(document.getElementById('intentos_por_pregunta').value),
+                tiempo_instrucciones: parseInt(document.getElementById('tiempo_instrucciones').value),
+                fases: fases.map(f => ({
+                    nombre: f.nombre,
+                    descripcion: f.descripcion,
+                    preguntas: f.preguntas.map(p => ({
+                        pregunta: p.pregunta,
+                        objetivo: p.objetivo,
+                        criterio_star: p.criterio_star,
+                        competencia: p.competencia,
+                        peso: p.peso
+                    }))
+                }))
+            };
+            
+            try {
+                const res = await fetch('/api/admin/plantilla-v2', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(plantilla)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('✅ Plantilla guardada exitosamente');
+                    limpiarFormulario();
+                    cargarPlantillas();
+                    $('.tab-btn[data-tab="lista"]').click();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error al guardar');
+            }
+        });
+
+        async function cargarPlantillas() {
+            try {
+                const res = await fetch('/api/admin/plantillas-v2');
+                const data = await res.json();
+                if (data.success) {
+                    const container = document.getElementById('plantillas-container');
+                    if (data.plantillas.length === 0) {
+                        container.innerHTML = `<div class="col-span-3 text-center py-12 text-gray-500 border-2 border-dashed rounded-lg">No hay plantillas. Crea una nueva o carga desde archivo.</div>`;
+                        return;
+                    }
+                    container.innerHTML = data.plantillas.map(p => `
+                        <div class="bg-white rounded-xl shadow-md hover:shadow-lg transition p-5 border border-gray-200">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="px-2 py-1 text-xs rounded-full ${p.tipo === 'generica' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}">
+                                    ${p.tipo === 'generica' ? '📋 Genérica' : '🎯 Específica'}
+                                </span>
+                                <span class="text-xs text-gray-500">${new Date(p.fecha_creacion).toLocaleDateString()}</span>
+                            </div>
+                            <h3 class="text-lg font-semibold mb-1">${p.nombre}</h3>
+                            <p class="text-sm text-gray-600 mb-3">${p.descripcion || 'Sin descripción'}</p>
+                            <div class="flex items-center gap-2 text-xs text-gray-500 mb-3">
+                                <span>📋 ${p.fases_count || 0} fases</span>
+                                <span>📝 ${p.preguntas_count || 0} preguntas</span>
+                            </div>
+                            <div class="flex justify-end gap-2 mt-3 pt-3 border-t">
+                                <button onclick="verPlantilla(${p.id})" class="text-blue-600 text-sm hover:underline">Ver detalles</button>
+                                <button onclick="usarPlantilla(${p.id})" class="text-green-600 text-sm hover:underline">Usar</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        function verPlantilla(id) {
+            alert('Vista previa en desarrollo');
+        }
+
+        function usarPlantilla(id) {
+            alert('Redirigiendo a creación de entrevista con esta plantilla');
+        }
+
+        // Carga desde archivo JSON
+        document.getElementById('filePlantilla').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            document.getElementById('nombreArchivo').textContent = file.name;
+            
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const plantilla = JSON.parse(event.target.result);
+                    const res = await fetch('/api/admin/plantilla-v2', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(plantilla)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        alert('✅ Plantilla cargada exitosamente');
+                        cargarPlantillas();
+                        $('.tab-btn[data-tab="lista"]').click();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                } catch (err) {
+                    alert('Error al parsear el archivo JSON');
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        function cerrarModal() {
+            document.getElementById('modalPreview').classList.add('hidden');
+        }
+
+        // Cargar al inicio
+        cargarPlantillas();
+    </script>
+</body>
+</html>

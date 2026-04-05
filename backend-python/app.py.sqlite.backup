@@ -1,0 +1,2807 @@
+import os
+import json
+import sqlite3
+import re
+from datetime import datetime
+import pdfplumber
+import docx
+import docx2txt
+import mammoth
+import pandas as pd
+from io import BytesIO
+from flask import Flask, request, jsonify, send_file, render_template
+from flask_cors import CORS
+from openai import OpenAI
+from sentence_transformers import SentenceTransformer
+import chromadb
+import numpy as np
+import secrets
+from datetime import datetime
+
+app = Flask(__name__)
+CORS(app)  # Permite que React se conecte
+
+# =========================
+# CONFIGURACIÓN DE CARPETAS
+# =========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(BASE_DIR)  # Sube un nivel
+
+app.template_folder = os.path.join(BASE_DIR, 'templates')
+print(f"📁 Templates folder: {app.template_folder}")
+print(f"📄 Archivos en templates: {os.listdir(app.template_folder)}")
+
+UPLOAD_FOLDER = os.path.join(PARENT_DIR, "uploads")
+DB_FOLDER = os.path.join(PARENT_DIR, "database")
+DB_PATH = os.path.join(DB_FOLDER, "talent_pipeline.db")
+CHROMA_PATH = os.path.join(PARENT_DIR, "chroma_db")
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(DB_FOLDER, exist_ok=True)
+os.makedirs(CHROMA_PATH, exist_ok=True)
+
+VIDEO_UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "entrevistas_video")
+os.makedirs(VIDEO_UPLOAD_FOLDER, exist_ok=True)
+
+ALLOWED_VIDEO_EXTENSIONS = {'webm', 'mp4', 'mkv'}
+
+def allowed_video_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
+
+print(f"📂 Backend Python iniciado")
+print(f"📁 Uploads: {UPLOAD_FOLDER}")
+print(f"📁 BD: {DB_PATH}")
+
+
+
+# =========================
+# EMBEDDINGS
+# =========================
+print("🔄 Cargando modelo de embeddings...")
+modelo_embeddings = SentenceTransformer('all-MiniLM-L6-v2')
+print("✅ Modelo cargado")
+
+chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+try:
+    coleccion = chroma_client.get_collection("candidatos")
+    print(f"✅ Embeddings: {coleccion.count()} candidatos")
+except:
+    coleccion = chroma_client.create_collection(name="candidatos")
+    print("✅ Nueva colección de embeddings")
+
+# =========================
+# API KEYS (usar variables de entorno)
+# =========================
+openai_client = import os
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+)
+
+# =========================
+# FUNCIONES BD (MISMO CÓDIGO QUE TENÍAS)
+# =========================
+
+def init_database():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            archivo TEXT UNIQUE,
+            nombre TEXT,
+            telefono TEXT,
+            email TEXT,
+            ubicacion TEXT,
+            profesion TEXT,
+            universidad TEXT,
+            grado_academico TEXT,
+            anio_graduacion TEXT,
+            perfil_profesional TEXT,
+            anos_experiencia TEXT,
+            sector_principal TEXT,
+            pretension_salarial TEXT,
+            disponibilidad TEXT,
+            score INTEGER,
+            criterio_ai TEXT,
+            fecha_analisis TIMESTAMP,
+            raw_data TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS habilidades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            habilidad TEXT,
+            tipo TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS industrias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            industria TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id INTEGER,
+            rol TEXT,
+            FOREIGN KEY (candidate_id) REFERENCES candidates (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_candidates_sector ON candidates(sector_principal)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(score)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_habilidades ON habilidades(habilidad, tipo)')
+
+    # Plantillas de entrevista (configuración)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS plantillas_entrevista (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT,
+            puesto TEXT,
+            tipo TEXT DEFAULT 'generica',
+            fecha_creacion TIMESTAMP,
+            activa BOOLEAN DEFAULT 1
+        )
+    ''')
+    
+    # Banco de preguntas
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS banco_preguntas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plantilla_id INTEGER,
+            pregunta TEXT,
+            categoria TEXT,
+            orden INTEGER,
+            tiempo_maximo INTEGER DEFAULT 120,
+            FOREIGN KEY (plantilla_id) REFERENCES plantillas_entrevista (id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Entrevistas realizadas
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS entrevistas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidato_id INTEGER NOT NULL,
+            plantilla_id INTEGER,
+            token_acceso TEXT UNIQUE,
+            fecha_inicio TIMESTAMP,
+            fecha_fin TIMESTAMP,
+            estado TEXT DEFAULT 'pendiente',
+            transcripcion_completa TEXT,
+            analisis_ia TEXT,
+            puntuacion_global REAL,
+            enlace_compartido TEXT,
+            FOREIGN KEY (candidato_id) REFERENCES candidates (id),
+            FOREIGN KEY (plantilla_id) REFERENCES plantillas_entrevista (id)
+        )
+    ''')
+    
+    # Respuestas de la entrevista
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS respuestas_entrevista (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entrevista_id INTEGER,
+            pregunta_id INTEGER,
+            pregunta_texto TEXT,
+            respuesta_texto TEXT,
+            respuesta_video_path TEXT,
+            tiempo_respuesta INTEGER,
+            analisis_pregunta TEXT,
+            puntuacion_pregunta REAL,
+            FOREIGN KEY (entrevista_id) REFERENCES entrevistas (id),
+            FOREIGN KEY (pregunta_id) REFERENCES banco_preguntas (id)
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+    print("✅ Base de datos SQLite inicializada")
+
+# =========================
+# FUNCIONES DE AYUDA (copia las que ya tienes)
+# =========================
+
+def safe_json_parse(text):
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    json_text = text[start:end]
+    return json.loads(json_text)
+
+def normalize_lists(data):
+    if "interpretacion" in data:
+        for campo in ["industrias_secundarias", "habilidades_clave", "fortalezas", "areas_mejora"]:
+            if campo in data["interpretacion"]:
+                arr = data["interpretacion"][campo]
+                if not arr:
+                    data["interpretacion"][campo] = []
+                else:
+                    clean = []
+                    for item in arr:
+                        if isinstance(item, dict):
+                            clean.append(" ".join(str(v) for v in item.values()))
+                        else:
+                            clean.append(str(item))
+                    data["interpretacion"][campo] = clean
+        
+        if "datos_crudos" in data:
+            fields = ["certificaciones", "habilidades_listadas", "herramientas_listadas", "idiomas_listados"]
+            for f in fields:
+                arr = data["datos_crudos"].get(f)
+                if not arr:
+                    data["datos_crudos"][f] = []
+                else:
+                    clean = []
+                    for item in arr:
+                        if isinstance(item, dict):
+                            clean.append(" ".join(str(v) for v in item.values()))
+                        else:
+                            clean.append(str(item))
+                    data["datos_crudos"][f] = clean
+    else:
+        fields = ["certificaciones", "industrias", "roles", "logros", "habilidades", "herramientas", "idiomas"]
+        for f in fields:
+            arr = data.get(f)
+            if not arr:
+                data[f] = []
+                continue
+            clean = []
+            for item in arr:
+                if isinstance(item, dict):
+                    clean.append(" ".join(str(v) for v in item.values()))
+                else:
+                    clean.append(str(item))
+            data[f] = clean
+    return data
+
+def analyze_cv(text, model_choice):
+    prompt = f"""
+Eres un headhunter experto con 20 años de experiencia. Tu tarea es ANALIZAR e INTERPRETAR el CV.
+
+Devuelve SOLO JSON con esta estructura:
+{{
+  "datos_crudos": {{
+    "nombre": "", "telefono": "", "email": "", "ubicacion": "",
+    "profesion_escrita": "", "universidad": "", "grado_academico": "", "anio_graduacion": "",
+    "certificaciones": [], "perfil_textual": "",
+    "experiencia_laboral": [  // ← NUEVO: lista de experiencias laborales
+      {{
+        "puesto": "",
+        "empresa": "",
+        "fecha_inicio": "",
+        "fecha_fin": "",
+        "descripcion": ""
+      }}
+    ],
+    "experiencia_texto": "",  // Lo mantenemos por compatibilidad
+    "habilidades_listadas": [], "herramientas_listadas": [], "idiomas_listados": [],
+    "pretension_salarial": "", "disponibilidad": "",
+    "empresas": []  // Lista única de todas las empresas (sin duplicados)
+  }},
+  "interpretacion": {{
+    "sector_deducido": "", "anos_experiencia_deducidos": "", "seniority": "",
+    "perfil_interpretado": "", "industria_principal": "", "industrias_secundarias": [],
+    "habilidades_clave": [], "fortalezas": [], "areas_mejora": [],
+    "rol_tipico": "", "nivel_impacto": "", "recomendacion": ""
+  }}
+}}
+
+INSTRUCCIONES ESPECÍFICAS PARA EXTRAER EMPRESAS Y EXPERIENCIA LABORAL:
+
+1. **EXPERIENCIA LABORAL**: Busca en el CV la sección de experiencia profesional. Por cada trabajo, extrae:
+   - puesto: el cargo que ocupó
+   - empresa: el nombre de la empresa (MUY IMPORTANTE)
+   - fecha_inicio: año o fecha de inicio
+   - fecha_fin: año o fecha de fin (o "Presente" si continúa)
+   - descripción: breve descripción de funciones
+
+2. **EMPRESAS**: Al final, crea una lista "empresas" con TODOS los nombres de empresas encontrados (sin repetir).
+
+3. **EXPERIENCIA_TEXTO**: Además, guarda el texto completo de la sección de experiencia (para compatibilidad).
+
+EJEMPLO DE CÓMO DEBE QUEDAR:
+Si el CV dice:
+"2018-2020: Desarrollador Java en Scotiabank
+ 2020-2022: Analista Senior en BAC Credomatic"
+
+Debe quedar:
+"experiencia_laboral": [
+  {{"puesto": "Desarrollador Java", "empresa": "Scotiabank", "fecha_inicio": "2018", "fecha_fin": "2020", "descripcion": ""}},
+  {{"puesto": "Analista Senior", "empresa": "BAC Credomatic", "fecha_inicio": "2020", "fecha_fin": "2022", "descripcion": ""}}
+],
+"empresas": ["Scotiabank", "BAC Credomatic"]
+
+CV a analizar:
+{text[:12000]}
+"""
+    if model_choice == "deepseek":
+        client = deepseek_client
+        model = "deepseek-chat"
+    else:
+        client = openai_client
+        model = "gpt-4o-mini"
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+    return safe_json_parse(response.choices[0].message.content)
+
+def score_candidate(data):
+    if "interpretacion" in data:
+        interp = data["interpretacion"]
+        score = 0
+        if interp.get("seniority") in ["Senior", "Lead"]: score += 20
+        elif interp.get("seniority") == "Semi-Senior": score += 15
+        elif interp.get("seniority") == "Junior": score += 10
+        if interp.get("habilidades_clave"): score += min(25, len(interp["habilidades_clave"]) * 5)
+        if interp.get("fortalezas"): score += min(15, len(interp["fortalezas"]) * 3)
+        if interp.get("nivel_impacto") == "Alto": score += 20
+        elif interp.get("nivel_impacto") == "Medio": score += 10
+        elif interp.get("nivel_impacto") == "Bajo": score += 5
+        if interp.get("industria_principal"): score += 5
+        if interp.get("industrias_secundarias"): score += min(5, len(interp["industrias_secundarias"]))
+        exp_text = interp.get("anos_experiencia_deducidos", "")
+        if "años" in exp_text:
+            match = re.search(r'(\d+)', exp_text)
+            if match:
+                años = int(match.group(1))
+                if años >= 8: score += 10
+                elif años >= 5: score += 7
+                elif años >= 2: score += 4
+        if score >= 80: criterio = "Alta compatibilidad"
+        elif score >= 60: criterio = "Compatibilidad media-alta"
+        elif score >= 40: criterio = "Compatibilidad media"
+        elif score >= 20: criterio = "Compatibilidad media-baja"
+        else: criterio = "Perfil limitado"
+        data["score"] = score
+        data["criterio_ai"] = criterio
+    return data
+
+def generar_embedding_candidato(data, candidate_id):
+    """Genera embedding para un candidato incluyendo TODOS los datos disponibles"""
+    try:
+        texto_completo = ""
+        empresas_encontradas = []
+        
+        # ===== 1. DATOS CRUDOS (lo que está explícitamente en el CV) =====
+        if "datos_crudos" in data:
+            dc = data["datos_crudos"]
+            
+            # ===== NUEVO: EXTRAER EMPRESAS DE experiencia_laboral (si existe) =====
+            if 'experiencia_laboral' in dc and dc['experiencia_laboral']:
+                print(f"📋 Extrayendo empresas de experiencia_laboral estructurada...")
+                for exp in dc['experiencia_laboral']:
+                    if exp.get('empresa') and exp['empresa'].strip():
+                        empresa = exp['empresa'].strip()
+                        if empresa not in empresas_encontradas:
+                            empresas_encontradas.append(empresa)
+                print(f"✅ Empresas encontradas en estructura: {empresas_encontradas}")
+            
+            # ===== FALLBACK: Si no hay experiencia_laboral, usar el método anterior con IA =====
+            if not empresas_encontradas and dc.get('experiencia_texto'):
+                exp_texto = dc.get('experiencia_texto', '')
+                nombre = dc.get('nombre', 'Candidato')
+                
+                print(f"🤖 Usando IA para extraer empresas de {nombre} (fallback)...")
+                
+                try:
+                    prompt = f"""
+Del siguiente texto de experiencia laboral de {nombre}, extrae SOLO los nombres de las empresas:
+
+{exp_texto[:2000]}
+
+Devuelve SOLO JSON: {{"empresas": []}}
+"""
+                    response = openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=150
+                    )
+                    
+                    contenido = response.choices[0].message.content
+                    import re
+                    import json
+                    json_match = re.search(r'\{.*\}', contenido, re.DOTALL)
+                    if json_match:
+                        resultado = json.loads(json_match.group())
+                        empresas_encontradas = resultado.get('empresas', [])
+                        print(f"✅ IA encontró: {empresas_encontradas}")
+                        
+                except Exception as e:
+                    print(f"⚠️ Error con IA: {e}")
+            
+            # ===== TAMBIÉN VERIFICAR si ya venía el campo empresas =====
+            if not empresas_encontradas and dc.get('empresas'):
+                empresas_encontradas = dc.get('empresas', [])
+                print(f"📦 Usando empresas ya guardadas: {empresas_encontradas}")
+            
+            # Guardar empresas en data para futuros usos
+            if empresas_encontradas:
+                if 'datos_crudos' not in data:
+                    data['datos_crudos'] = {}
+                data['datos_crudos']['empresas'] = empresas_encontradas
+            
+            # Construir texto base (siempre igual)
+            texto_completo += f"""
+            NOMBRE: {dc.get('nombre', '')}
+            PROFESIÓN ESCRITA: {dc.get('profesion_escrita', '')}
+            TELÉFONO: {dc.get('telefono', '')}
+            EMAIL: {dc.get('email', '')}
+            UBICACIÓN: {dc.get('ubicacion', '')}
+            UNIVERSIDAD: {dc.get('universidad', '')}
+            GRADO ACADÉMICO: {dc.get('grado_academico', '')}
+            AÑO GRADUACIÓN: {dc.get('anio_graduacion', '')}
+            CERTIFICACIONES: {', '.join(dc.get('certificaciones', []))}
+            PERFIL TEXTUAL: {dc.get('perfil_textual', '')}
+            EXPERIENCIA TEXTO: {dc.get('experiencia_texto', '')}
+            HABILIDADES LISTADAS: {', '.join(dc.get('habilidades_listadas', []))}
+            HERRAMIENTAS LISTADAS: {', '.join(dc.get('herramientas_listadas', []))}
+            IDIOMAS LISTADOS: {', '.join(dc.get('idiomas_listados', []))}
+            PRETENSIÓN SALARIAL: {dc.get('pretension_salarial', '')}
+            DISPONIBILIDAD: {dc.get('disponibilidad', '')}
+            """
+            
+            # ===== AGREGAR EXPERIENCIA LABORAL ESTRUCTURADA (si existe) =====
+            if 'experiencia_laboral' in dc and dc['experiencia_laboral']:
+                texto_completo += "\nEXPERIENCIA LABORAL DETALLADA:\n"
+                for exp in dc['experiencia_laboral']:
+                    puesto = exp.get('puesto', '')
+                    empresa = exp.get('empresa', '')
+                    inicio = exp.get('fecha_inicio', '')
+                    fin = exp.get('fecha_fin', '')
+                    texto_completo += f"- {puesto} en {empresa} ({inicio}-{fin})\n"
+                    if exp.get('descripcion'):
+                        texto_completo += f"  {exp.get('descripcion', '')}\n"
+            
+            # Agregar empresas destacadas al texto (repetidas para darles peso)
+            if empresas_encontradas:
+                texto_completo += f"""
+            EMPRESAS DONDE TRABAJÓ: {', '.join(empresas_encontradas)}
+            EMPRESAS DESTACADAS: {', '.join(empresas_encontradas)}
+            EMPRESAS DESTACADAS: {', '.join(empresas_encontradas)}
+            """
+        else:
+            # Si no hay datos_crudos, intentar con la estructura antigua
+            texto_completo += f"""
+            NOMBRE: {data.get('nombre', '')}
+            PROFESIÓN: {data.get('profesion', '')}
+            UNIVERSIDAD: {data.get('universidad', '')}
+            UBICACIÓN: {data.get('ubicacion', '')}
+            TELÉFONO: {data.get('telefono', '')}
+            EMAIL: {data.get('email', '')}
+            EXPERIENCIA: {data.get('anos_experiencia', '')}
+            SECTOR: {data.get('sector_principal', '')}
+            HABILIDADES: {', '.join(data.get('habilidades', []))}
+            HERRAMIENTAS: {', '.join(data.get('herramientas', []))}
+            PERFIL: {data.get('perfil_profesional', '')}
+            """
+        
+        # ===== 2. INTERPRETACIÓN IA =====
+        if "interpretacion" in data:
+            interp = data["interpretacion"]
+            texto_completo += f"""
+            SECTOR DEDUCIDO: {interp.get('sector_deducido', '')}
+            AÑOS EXPERIENCIA DEDUCIDOS: {interp.get('anos_experiencia_deducidos', '')}
+            SENIORITY: {interp.get('seniority', '')}
+            PERFIL INTERPRETADO: {interp.get('perfil_interpretado', '')}
+            INDUSTRIA PRINCIPAL: {interp.get('industria_principal', '')}
+            INDUSTRIAS SECUNDARIAS: {', '.join(interp.get('industrias_secundarias', []))}
+            HABILIDADES CLAVE: {', '.join(interp.get('habilidades_clave', []))}
+            FORTALEZAS: {', '.join(interp.get('fortalezas', []))}
+            ÁREAS DE MEJORA: {', '.join(interp.get('areas_mejora', []))}
+            ROL TÍPICO: {interp.get('rol_tipico', '')}
+            NIVEL DE IMPACTO: {interp.get('nivel_impacto', '')}
+            RECOMENDACIÓN: {interp.get('recomendacion', '')}
+            """
+        
+        # ===== 3. DATOS ADICIONALES =====
+        texto_completo += f"""
+        ARCHIVO: {data.get('archivo', '')}
+        SCORE: {data.get('score', 0)}
+        """
+        
+        # MOSTRAR EN CONSOLA PARA DEBUG
+        print(f"\n{'='*60}")
+        print(f"🔍 GENERANDO EMBEDDING PARA CANDIDATO ID: {candidate_id}")
+        print(f"{'='*60}")
+        print(f"📄 TEXTO COMPLETO ({len(texto_completo)} caracteres)")
+        if empresas_encontradas:
+            print(f"🏢 EMPRESAS ENCONTRADAS: {', '.join(empresas_encontradas)}")
+        print(f"🔍 EMPRESAS ENCONTRADAS RAW: {empresas_encontradas}")
+        print(f"📄 Tipo de datos: {type(empresas_encontradas)}")
+        print(f"{'='*60}\n")
+        
+        # Generar embedding
+        embedding = modelo_embeddings.encode(texto_completo).tolist()
+        
+        # Guardar en ChromaDB con metadatos enriquecidos
+        metadatos = {
+            "nombre": data.get('datos_crudos', {}).get('nombre') if "datos_crudos" in data else data.get('nombre', ''),
+            "archivo": data['archivo'],
+            "id": candidate_id
+        }
+        
+        # Guardar empresas en metadatos para acceso rápido
+        if empresas_encontradas:
+            metadatos["empresas"] = ', '.join(empresas_encontradas)[:200]
+        
+        coleccion.upsert(
+            embeddings=[embedding],
+            ids=[str(candidate_id)],
+            metadatas=[metadatos]
+        )
+        
+        print(f"💾 Guardando en metadatos: {metadatos}")
+        print(f"✅ Embedding guardado para candidato ID: {candidate_id}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error generando embedding: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+def buscar_por_embedding(texto_busqueda, limite=20):
+    try:
+        embedding_busqueda = modelo_embeddings.encode(texto_busqueda).tolist()
+        resultados = coleccion.query(query_embeddings=[embedding_busqueda], n_results=limite)
+        if not resultados['ids'][0]: return []
+        ids_candidatos = [int(id) for id in resultados['ids'][0]]
+        distancias = resultados['distances'][0]
+        max_dist = max(distancias) if distancias else 1
+        similitudes = [1 - (d / max_dist) for d in distancias]
+        todos = load_all_candidates_from_db()
+        dicc_candidatos = {c.get('id'): c for c in todos}
+        candidatos = []
+        for i, id_candidato in enumerate(ids_candidatos):
+            if id_candidato in dicc_candidatos:
+                candidato = dicc_candidatos[id_candidato]
+                candidato['similitud_semantica'] = round(similitudes[i] * 100, 1)
+                candidatos.append(candidato)
+        return candidatos
+    except Exception as e:
+        print(f"❌ Error búsqueda: {e}")
+        return []
+
+def save_candidate_to_db(data):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM candidates WHERE archivo = ?", (data['archivo'],))
+        existing = cursor.fetchone()
+        if "interpretacion" in data:
+            nombre = data.get('datos_crudos', {}).get('nombre')
+            profesion = data.get('datos_crudos', {}).get('profesion_escrita')
+            universidad = data.get('datos_crudos', {}).get('universidad')
+            sector_principal = data['interpretacion'].get('sector_deducido')
+            anos_experiencia = data['interpretacion'].get('anos_experiencia_deducidos')
+        else:
+            nombre = data.get('nombre')
+            profesion = data.get('profesion')
+            universidad = data.get('universidad')
+            sector_principal = data.get('sector_principal')
+            anos_experiencia = data.get('anos_experiencia')
+        if existing:
+            cursor.execute('''
+                UPDATE candidates SET nombre=?, telefono=?, email=?, ubicacion=?,
+                profesion=?, universidad=?, grado_academico=?, anio_graduacion=?,
+                perfil_profesional=?, anos_experiencia=?, sector_principal=?,
+                pretension_salarial=?, disponibilidad=?, score=?, criterio_ai=?,
+                fecha_analisis=?, raw_data=? WHERE archivo=?
+            ''', (
+                nombre,
+                data.get('datos_crudos', {}).get('telefono') if "interpretacion" in data else data.get('telefono'),
+                data.get('datos_crudos', {}).get('email') if "interpretacion" in data else data.get('email'),
+                data.get('datos_crudos', {}).get('ubicacion') if "interpretacion" in data else data.get('ubicacion'),
+                profesion, universidad,
+                data.get('datos_crudos', {}).get('grado_academico') if "interpretacion" in data else data.get('grado_academico'),
+                data.get('datos_crudos', {}).get('anio_graduacion') if "interpretacion" in data else data.get('anio_graduacion'),
+                data.get('perfil_profesional') if "interpretacion" not in data else data.get('datos_crudos', {}).get('perfil_textual'),
+                anos_experiencia, sector_principal,
+                data.get('pretension_salarial') if "interpretacion" not in data else data.get('datos_crudos', {}).get('pretension_salarial'),
+                data.get('disponibilidad') if "interpretacion" not in data else data.get('datos_crudos', {}).get('disponibilidad'),
+                data.get('score'), data.get('criterio_ai'), datetime.now(),
+                json.dumps(data, ensure_ascii=False), data['archivo']
+            ))
+            candidate_id = existing[0]
+            cursor.execute("DELETE FROM habilidades WHERE candidate_id = ?", (candidate_id,))
+            cursor.execute("DELETE FROM industrias WHERE candidate_id = ?", (candidate_id,))
+            cursor.execute("DELETE FROM roles WHERE candidate_id = ?", (candidate_id,))
+        else:
+            cursor.execute('''
+                INSERT INTO candidates (archivo, nombre, telefono, email, ubicacion,
+                profesion, universidad, grado_academico, anio_graduacion,
+                perfil_profesional, anos_experiencia, sector_principal,
+                pretension_salarial, disponibilidad, score, criterio_ai,
+                fecha_analisis, raw_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                data['archivo'], nombre,
+                data.get('datos_crudos', {}).get('telefono') if "interpretacion" in data else data.get('telefono'),
+                data.get('datos_crudos', {}).get('email') if "interpretacion" in data else data.get('email'),
+                data.get('datos_crudos', {}).get('ubicacion') if "interpretacion" in data else data.get('ubicacion'),
+                profesion, universidad,
+                data.get('datos_crudos', {}).get('grado_academico') if "interpretacion" in data else data.get('grado_academico'),
+                data.get('datos_crudos', {}).get('anio_graduacion') if "interpretacion" in data else data.get('anio_graduacion'),
+                data.get('perfil_profesional') if "interpretacion" not in data else data.get('datos_crudos', {}).get('perfil_textual'),
+                anos_experiencia, sector_principal,
+                data.get('pretension_salarial') if "interpretacion" not in data else data.get('datos_crudos', {}).get('pretension_salarial'),
+                data.get('disponibilidad') if "interpretacion" not in data else data.get('datos_crudos', {}).get('disponibilidad'),
+                data.get('score'), data.get('criterio_ai'), datetime.now(),
+                json.dumps(data, ensure_ascii=False)
+            ))
+            candidate_id = cursor.lastrowid
+        if "interpretacion" in data:
+            for habilidad in data['interpretacion'].get('habilidades_clave', []):
+                cursor.execute('INSERT INTO habilidades (candidate_id, habilidad, tipo) VALUES (?,?,?)',
+                             (candidate_id, habilidad, 'habilidad_clave'))
+            for fortaleza in data['interpretacion'].get('fortalezas', []):
+                cursor.execute('INSERT INTO habilidades (candidate_id, habilidad, tipo) VALUES (?,?,?)',
+                             (candidate_id, fortaleza, 'fortaleza'))
+            if data['interpretacion'].get('industria_principal'):
+                cursor.execute('INSERT INTO industrias (candidate_id, industria) VALUES (?,?)',
+                             (candidate_id, data['interpretacion']['industria_principal']))
+            for industria in data['interpretacion'].get('industrias_secundarias', []):
+                cursor.execute('INSERT INTO industrias (candidate_id, industria) VALUES (?,?)',
+                             (candidate_id, industria))
+        conn.commit()
+        generar_embedding_candidato(data, candidate_id)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+    return candidate_id
+
+def load_all_candidates_from_db():
+    """Carga todos los candidatos de la BD y enriquece con datos de ChromaDB"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, archivo, raw_data FROM candidates ORDER BY fecha_analisis DESC')
+    rows = cursor.fetchall()
+    candidates = []
+    
+    # Obtener TODOS los IDs para buscar en ChromaDB
+    todos_ids = [str(row[0]) for row in rows]
+    metadatos_dict = {}
+    
+    if todos_ids:
+        try:
+            # Obtener metadatos de ChromaDB para todos los candidatos
+            resultados = coleccion.get(ids=todos_ids, include=['metadatas'])
+            if resultados and 'metadatas' in resultados and 'ids' in resultados:
+                for i, id_str in enumerate(resultados['ids']):
+                    metadatos_dict[int(id_str)] = resultados['metadatas'][i]
+                print(f"📊 Metadatos cargados para {len(metadatos_dict)} candidatos")
+        except Exception as e:
+            print(f"⚠️ Error obteniendo metadatos de ChromaDB: {e}")
+    
+    for row in rows:
+        if row[2]:
+            try:
+                candidate = json.loads(row[2])
+                candidate['id'] = row[0]
+                
+                # Asegurar que datos_crudos existe
+                if 'datos_crudos' not in candidate:
+                    candidate['datos_crudos'] = {}
+                
+                # ===== 1. PRIORIDAD 1: EMPRESAS DESDE METADATOS =====
+                if row[0] in metadatos_dict and 'empresas' in metadatos_dict[row[0]]:
+                    empresas_str = metadatos_dict[row[0]]['empresas']
+                    if empresas_str and isinstance(empresas_str, str):
+                        # Convertir string de empresas a lista
+                        candidate['datos_crudos']['empresas'] = [e.strip() for e in empresas_str.split(',') if e.strip()]
+                        print(f"✅ Empresas desde metadatos para ID {row[0]}: {candidate['datos_crudos']['empresas']}")
+                
+                # ===== 2. PRIORIDAD 2: EMPRESAS DESDE experiencia_laboral =====
+                elif 'experiencia_laboral' in candidate['datos_crudos']:
+                    exp_laboral = candidate['datos_crudos']['experiencia_laboral']
+                    if exp_laboral and isinstance(exp_laboral, list):
+                        empresas = []
+                        for exp in exp_laboral:
+                            if isinstance(exp, dict) and exp.get('empresa'):
+                                empresa = exp['empresa'].strip()
+                                if empresa and empresa not in empresas:
+                                    empresas.append(empresa)
+                        if empresas:
+                            candidate['datos_crudos']['empresas'] = empresas
+                            print(f"✅ Empresas desde experiencia_laboral para ID {row[0]}: {empresas}")
+                
+                # ===== 3. PRIORIDAD 3: EMPRESAS YA GUARDADAS EN datos_crudos =====
+                elif 'empresas' in candidate['datos_crudos'] and candidate['datos_crudos']['empresas']:
+                    # Ya están, no hacer nada
+                    print(f"✅ Empresas ya existentes para ID {row[0]}: {candidate['datos_crudos']['empresas']}")
+                
+                # ===== 4. SI NO HAY EMPRESAS, LISTA VACÍA =====
+                else:
+                    candidate['datos_crudos']['empresas'] = []
+                    print(f"ℹ️ Sin empresas para ID {row[0]}")
+                
+                candidates.append(candidate)
+                
+            except json.JSONDecodeError as e:
+                print(f"❌ Error parseando JSON para ID {row[0]}: {e}")
+                continue
+    
+    conn.close()
+    print(f"📤 Devolviendo {len(candidates)} candidatos con datos enriquecidos")
+    return candidates
+
+def extract_pdf(path):
+    text = ""
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() or ""
+    return text
+
+def extract_docx(path):
+    text = ""
+    try:
+        with open(path, "rb") as docx_file:
+            result = mammoth.extract_raw_text(docx_file)
+            text = result.value
+            if len(text) > 50: return text
+    except: pass
+    try:
+        doc = docx.Document(path)
+        parts = []
+        for para in doc.paragraphs:
+            if para.text.strip(): parts.append(para.text)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.text.strip(): parts.append(cell.text)
+        text = "\n".join(parts)
+        if len(text) > 50: return text
+    except: pass
+    try: text = docx2txt.process(path)
+    except: pass
+    return text
+
+def extract_text(path):
+    if path.lower().endswith(".pdf"): return extract_pdf(path)
+    if path.lower().endswith(".docx"): return extract_docx(path)
+    return ""
+
+# =========================
+# API ENDPOINTS (NUEVOS)
+# =========================
+
+
+@app.route("/api/extraer-empresas", methods=["POST"])
+def extraer_empresas_ia():
+    """Usa IA para extraer empresas del texto de experiencia laboral"""
+    try:
+        data = request.json
+        experiencia_texto = data.get('experiencia', '')
+        nombre_candidato = data.get('nombre', 'Candidato')
+        
+        print(f"\n{'='*60}")
+        print(f"🏢 EXTRAYENDO EMPRESAS PARA: {nombre_candidato}")
+        print(f"{'='*60}")
+        
+        if not experiencia_texto or len(experiencia_texto) < 20:
+            print("⚠️ Texto de experiencia muy corto o vacío")
+            return jsonify({"success": True, "empresas": []})
+        
+        # Limitar texto para no saturar
+        texto_limitado = experiencia_texto[:3000]
+        print(f"📄 Texto a analizar: {len(texto_limitado)} caracteres")
+        
+        prompt = f"""
+Eres un asistente experto en análisis de currículums y extracción de información laboral.
+
+A continuación tienes la sección de EXPERIENCIA LABORAL de {nombre_candidato}:
+
+---
+{texto_limitado}
+---
+
+Tu tarea es identificar y listar TODAS las EMPRESAS donde ha trabajado esta persona.
+
+REGLAS IMPORTANTES:
+1. Extrae SOLO nombres de empresas, no cargos, no fechas, no descripciones de funciones
+2. Si una empresa se repite (ej. "Scotiabank" varias veces), inclúyela UNA SOLA vez
+3. Ignora palabras genéricas como "la empresa", "dicha compañía", "la organización"
+4. Si el texto menciona "BAC", "BAC Credomatic", inclúyelo como "BAC Credomatic"
+5. Si menciona "Microsoft", "Google", "Amazon", etc., inclúyelos
+6. Si menciona múltiples empresas, inclúyelas todas
+7. Si NO encuentras ninguna empresa, devuelve lista vacía
+8. Presta atención a formatos como:
+   - "Trabajé en [Empresa] como..."
+   - "Experiencia en [Empresa] (2018-2022)"
+   - "Laboré para [Empresa]"
+   - "En [Empresa] desempeñé..."
+   - "Empleado en [Empresa]"
+
+Devuelve SOLO un JSON con este formato:
+{{"empresas": ["Nombre Empresa 1", "Nombre Empresa 2", ...]}}
+
+EJEMPLOS CORRECTOS:
+- Input: "Trabajé en Scotiabank como ejecutivo de cuentas (2018-2020). Luego en BAC Credomatic."
+  Output: {{"empresas": ["Scotiabank", "BAC Credomatic"]}}
+
+- Input: "Experiencia en Microsoft y posteriormente en Google como desarrollador senior"
+  Output: {{"empresas": ["Microsoft", "Google"]}}
+
+- Input: "Fui gerente en varias empresas del sector financiero"
+  Output: {{"empresas": []}}  (porque no hay nombres específicos)
+
+- Input: "Laboré para Amazon Web Services (AWS) y después en Meta"
+  Output: {{"empresas": ["Amazon Web Services", "Meta"]}}
+
+AHORA, extrae las empresas del texto proporcionado:
+"""
+        
+        print("⏳ Llamando a OpenAI para extraer empresas...")
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres un extractor de información preciso. Solo devuelves JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0,
+            max_tokens=300
+        )
+        
+        contenido = response.choices[0].message.content
+        print(f"📥 Respuesta de OpenAI: {contenido[:200]}...")
+        
+        # Intentar parsear JSON
+        try:
+            # Buscar JSON en la respuesta
+            import re
+            json_match = re.search(r'\{.*\}', contenido, re.DOTALL)
+            if json_match:
+                resultado = json.loads(json_match.group())
+            else:
+                resultado = json.loads(contenido)
+        except:
+            # Si falla, usar función segura
+            resultado = safe_json_parse(contenido)
+        
+        empresas = resultado.get('empresas', [])
+        
+        # Limpiar y validar empresas
+        empresas_limpias = []
+        for emp in empresas:
+            if isinstance(emp, str):
+                emp_limpia = emp.strip()
+                # Eliminar puntuación al final
+                emp_limpia = re.sub(r'[.,;:!?]$', '', emp_limpia)
+                # Validar que no sea demasiado corta o genérica
+                if (len(emp_limpia) > 2 and 
+                    emp_limpia.lower() not in ['empresa', 'compañía', 'corporación', 'banco', 'la empresa']):
+                    empresas_limpias.append(emp_limpia)
+        
+        # Eliminar duplicados
+        empresas_unicas = list(set(empresas_limpias))
+        
+        print(f"✅ Empresas extraídas para {nombre_candidato}: {empresas_unicas}")
+        print(f"{'='*60}\n")
+        
+        return jsonify({
+            "success": True,
+            "empresas": empresas_unicas
+        })
+        
+    except Exception as e:
+        print(f"❌ Error extrayendo empresas: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/analyze-search", methods=["POST"])
+def analyze_search():
+    """Analiza la intención de búsqueda del usuario - VERSIÓN MEJORADA"""
+    try:
+        data = request.json
+        query = data.get('query', '')
+        
+        prompt = f"""
+Eres un headhunter experto. Analiza esta búsqueda de reclutamiento y extrae TODA la información relevante.
+
+Búsqueda: "{query}"
+
+Extrae:
+- LUGARES (ciudades, provincias, países, regiones)
+- UNIVERSIDADES (cualquier mención de instituciones educativas)
+- HABILIDADES técnicas o blandas
+- ROL o puesto buscado
+- SECTOR o industria
+- SENIORITY requerido
+- EXCLUIR perfiles que no sirven
+
+Devuelve SOLO JSON con esta estructura:
+{{
+  "lugares": ["lista", "de", "lugares", "mencionados"],
+  "universidades": ["lista", "de", "universidades"],
+  "habilidades": ["lista", "de", "habilidades"],
+  "rol_buscado": "el rol o puesto que busca",
+  "sector": "sector o industria mencionada",
+  "seniority": "seniority requerido (si menciona)",
+  "excluir": ["tipos", "de", "perfiles", "que", "no", "sirven"],
+  "texto_original": "{query}"
+}}
+
+IMPORTANTE: 
+- Si menciona "universidad de Costa Rica", "UCR", o similar, inclúyelo en universidades.
+- Si menciona "Liberia", "Guanacaste", "San José", etc., inclúyelo en lugares.
+- Si menciona habilidades como "Python", "Java", "office", inclúyelo en habilidades.
+"""
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        
+        analysis = safe_json_parse(response.choices[0].message.content)
+        print(f"📊 Análisis extraído: {analysis}")
+        
+        return jsonify({"success": True, "analysis": analysis})
+        
+    except Exception as e:
+        print(f"❌ Error en analyze-search: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/search-embedding-enhanced", methods=["POST"])
+def search_embedding_enhanced():
+    """Búsqueda semántica simplificada pero efectiva"""
+    try:
+        data = request.json
+        query = data.get('query', '')
+        analysis = data.get('analysis', {})
+        limite = data.get('limite', 30)
+        
+        print(f"📥 Búsqueda: '{query}'")
+        print(f"📋 Análisis: {analysis}")
+        
+        # Extraer términos útiles del análisis
+        lugares = analysis.get('lugares', [])
+        universidades = analysis.get('universidades', [])
+        habilidades = analysis.get('habilidades', [])
+        
+        # Construir consulta enriquecida
+        query_enriquecida = query
+        if lugares:
+            query_enriquecida += " " + " ".join(lugares)
+        if universidades:
+            query_enriquecida += " " + " ".join(universidades)
+        if habilidades:
+            query_enriquecida += " " + " ".join(habilidades)
+        
+        print(f"🔍 Consulta enriquecida: {query_enriquecida}")
+        
+        # Búsqueda semántica base
+        candidatos = buscar_por_embedding(query_enriquecida, limite * 2)
+        
+        # Si no hay resultados con la consulta enriquecida, intentar con la original
+        if len(candidatos) == 0:
+            print("⚠️ Sin resultados, intentando con consulta original")
+            candidatos = buscar_por_embedding(query, limite * 2)
+        
+        print(f"📊 Resultados base: {len(candidatos)} candidatos")
+        
+        # SIMPLEMENTE DEVOLVER LOS RESULTADOS CON SU SIMILITUD
+        for c in candidatos:
+            c['relevancia'] = c.get('similitud_semantica', 50)
+        
+        print(f"✅ Devolviendo {len(candidatos)} candidatos")
+        
+        return jsonify({
+            "success": True,
+            "data": candidatos[:limite],
+            "total": len(candidatos)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/candidates", methods=["GET"])
+def api_get_candidates():
+    try:
+        candidates = load_all_candidates_from_db()
+        return jsonify({"success": True, "data": candidates})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/analyze", methods=["POST"])
+def api_analyze():
+    try:
+        print("="*50)
+        print("📥 PYTHON: Recibida petición de análisis")
+        
+        # Inicializar base de datos
+        init_database()
+        
+        # Obtener archivos
+        files = request.files.getlist("files")
+        print(f"📁 Archivos recibidos: {len(files)}")
+        
+        if not files:
+            print("❌ No se recibieron archivos")
+            return jsonify({"success": False, "error": "No se recibieron archivos"}), 400
+        
+        model = request.form.get("model", "gpt")
+        print(f"🤖 Modelo: {model}")
+        
+        results = []
+        
+        for file in files:
+            filename = file.filename
+            print(f"📄 Procesando: {filename}")
+            
+            # Guardar archivo
+            path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(path)
+            print(f"✅ Archivo guardado en: {path}")
+            
+            # Extraer texto
+            text = extract_text(path)
+            print(f"📝 Texto extraído: {len(text)} caracteres")
+            
+            if not text or len(text) < 50:
+                print(f"⚠️ Texto muy corto o vacío para {filename}")
+                continue
+            
+            # Analizar con IA
+            print(f"🤖 Analizando con {model}...")
+            data = analyze_cv(text, model)
+            print(f"✅ Análisis completado")
+            
+            data = normalize_lists(data)
+            data = score_candidate(data)
+            data["archivo"] = filename
+            data["fecha_analisis"] = datetime.now().isoformat()
+            
+            # Guardar en BD
+            candidate_id = save_candidate_to_db(data)
+            print(f"✅ Candidato guardado con ID: {candidate_id}")
+            
+            results.append(data)
+        
+        print(f"📊 Total procesados: {len(results)}")
+        print("="*50)
+        
+        # ⚠️ IMPORTANTE: Siempre devolver algo
+        return jsonify({"success": True, "data": results})
+        
+    except Exception as e:
+        print(f"❌ ERROR en Python: {e}")
+        import traceback
+        traceback.print_exc()
+        # ⚠️ IMPORTANTE: Devolver error en caso de excepción
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    """Búsqueda tradicional - maneja tanto q como skills[]"""
+    try:
+        query = request.args.get('q', '')
+        skills_list = request.args.getlist('skills[]')
+        
+        print(f"📥 Búsqueda tradicional - q: '{query}', skills[]: {skills_list}")
+        
+        if not query and skills_list:
+            query = " ".join(skills_list)
+            print(f"🔍 Query construida desde skills: '{query}'")
+        
+        if not query:
+            return jsonify({"success": False, "error": "Query required"}), 400
+        
+        results = buscar_por_embedding(query, 20)
+        
+        return jsonify({
+            "success": True, 
+            "data": results,
+            "count": len(results)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en búsqueda: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/stats", methods=["GET"])
+def api_stats():
+    try:
+        candidates = load_all_candidates_from_db()
+        total = len(candidates)
+        sectores = set()
+        skills = set()
+        senior = 0
+        for c in candidates:
+            if c.get("interpretacion"):
+                if c["interpretacion"].get("sector_deducido"):
+                    sectores.add(c["interpretacion"]["sector_deducido"])
+                if c["interpretacion"].get("habilidades_clave"):
+                    skills.update(c["interpretacion"]["habilidades_clave"])
+                if c["interpretacion"].get("seniority") in ["Senior", "Lead"]:
+                    senior += 1
+            else:
+                if c.get("sector_principal"): sectores.add(c["sector_principal"])
+                if c.get("habilidades"): skills.update(c["habilidades"])
+        return jsonify({
+            "success": True,
+            "stats": {
+                "total": total,
+                "sectores": len(sectores),
+                "skills": len(skills),
+                "senior_percent": round((senior/total*100) if total > 0 else 0)
+            }
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/view-cv/<path:filename>", methods=["GET"])
+def api_view_cv(filename):
+    try:
+        from urllib.parse import unquote
+        filename = unquote(filename)
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.exists(file_path):
+            return jsonify({"success": False, "error": "File not found"}), 404
+        return send_file(file_path)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/search-embedding", methods=["POST"])
+def search_embedding():
+    """Búsqueda semántica con embeddings"""
+    try:
+        data = request.json
+        query = data.get('query', '')
+        limite = data.get('limite', 20)
+        
+        print(f"📥 Búsqueda por embedding: '{query}'")
+        
+        if not query:
+            return jsonify({"success": False, "error": "Texto de búsqueda vacío"}), 400
+        
+        # Llamar a la función de búsqueda
+        candidatos = buscar_por_embedding(query, limite)
+        
+        print(f"✅ Embeddings encontrados: {len(candidatos)} resultados")
+        
+        return jsonify({
+            "success": True,
+            "data": candidatos,
+            "count": len(candidatos)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en búsqueda: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500       
+
+@app.route("/api/ranking-ia", methods=["POST"])
+def ranking_ia():
+    """Ranking fino con ChatGPT sobre resultados de embeddings"""
+    try:
+        data = request.json
+        candidatos = data.get('candidatos', [])
+        query = data.get('query', '')
+        model = data.get('model', 'gpt')
+        
+        print(f"📥 Ranking IA para: '{query}' con {len(candidatos)} candidatos")
+        
+        if not candidatos or not query:
+            return jsonify({"success": False, "error": "Faltan datos"}), 400
+        
+        # Limitar a 10 candidatos para no saturar
+        candidatos_limit = candidatos[:10]
+        
+        # Preparar resumen para ChatGPT
+        resumen = "Candidatos a evaluar:\n\n"
+        for i, c in enumerate(candidatos_limit):
+            if "interpretacion" in c:
+                resumen += f"{i+1}. {c.get('datos_crudos', {}).get('nombre', 'Sin nombre')}\n"
+                resumen += f"   Perfil: {c['interpretacion'].get('perfil_interpretado', '')[:200]}\n"
+                resumen += f"   Habilidades: {', '.join(c['interpretacion'].get('habilidades_clave', []))}\n"
+                resumen += f"   Experiencia: {c['interpretacion'].get('anos_experiencia_deducidos', '')}\n"
+                resumen += f"   Seniority: {c['interpretacion'].get('seniority', '')}\n\n"
+            else:
+                resumen += f"{i+1}. {c.get('nombre', 'Sin nombre')}\n"
+                resumen += f"   Perfil: {c.get('perfil_profesional', '')[:200]}\n"
+                resumen += f"   Habilidades: {', '.join(c.get('habilidades', []))}\n"
+                resumen += f"   Experiencia: {c.get('anos_experiencia', '')}\n\n"
+        
+        prompt = f"""
+Eres un headhunter experto. Te voy a dar:
+1. Una búsqueda: "{query}"
+2. Una lista de {len(candidatos_limit)} candidatos preseleccionados
+
+Tu tarea es:
+- Analizar cada candidato
+- Ordenarlos del MEJOR al PEOR para esta búsqueda específica
+- Dar una explicación breve de por qué el #1 es el mejor
+
+Devuelve SOLO JSON con este formato:
+{{
+  "ranking": [1, 3, 2, 5, 4, ...],  // Números de candidato en orden de mejor a peor
+  "mejor_explicacion": "Ana es la mejor porque...",
+  "analisis": "Observaciones generales sobre los candidatos..."
+}}
+
+{resumen}
+"""
+        
+        # Elegir modelo
+        if model == "deepseek":
+            client = deepseek_client
+            model_name = "deepseek-chat"
+        else:
+            client = openai_client
+            model_name = "gpt-4o-mini"
+        
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        
+        result = response.choices[0].message.content
+        ranking_data = safe_json_parse(result)
+        
+        # Reordenar candidatos según ranking
+        ranking_ids = ranking_data.get('ranking', [])
+        candidatos_ordenados = []
+        for pos in ranking_ids:
+            if 1 <= pos <= len(candidatos_limit):
+                candidatos_ordenados.append(candidatos_limit[pos-1])
+        
+        # Agregar el resto de candidatos (los que no estaban en el ranking)
+        for c in candidatos:
+            if c not in candidatos_ordenados:
+                candidatos_ordenados.append(c)
+        
+        print(f"✅ Ranking completado")
+        
+        return jsonify({
+            "success": True,
+            "data": candidatos_ordenados,
+            "explicacion": ranking_data.get('mejor_explicacion', ''),
+            "analisis": ranking_data.get('analisis', '')
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en ranking: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+@app.route("/api/reindex-embeddings", methods=["GET", "POST"])  # Acepta GET también
+def reindex_embeddings():
+    """Reconstruye todos los embeddings con la nueva información completa"""
+    try:
+        print("🔄 Iniciando reindexación completa de embeddings...")
+        candidatos = load_all_candidates_from_db()
+        print(f"📊 Total de candidatos: {len(candidatos)}")
+        
+        exitos = 0
+        errores = 0
+        
+        for i, c in enumerate(candidatos):
+            print(f"⏳ Procesando {i+1}/{len(candidatos)}: {c.get('archivo', 'desconocido')}")
+            if generar_embedding_candidato(c, c['id']):
+                exitos += 1
+            else:
+                errores += 1
+        
+        print(f"✅ Reindexación completada: {exitos} éxitos, {errores} errores")
+        
+        # Verificar cuántos embeddings hay ahora
+        count = coleccion.count()
+        print(f"📈 Total de embeddings en ChromaDB: {count}")
+        
+        return jsonify({
+            "success": True,
+            "message": f"Reindexación completada: {exitos} éxitos, {errores} errores",
+            "total_embeddings": count
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en reindexación: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/asistente", methods=["POST"])
+def asistente_inteligente():
+    """Headhunter experto que responde CUALQUIER pregunta en lenguaje natural"""
+    try:
+        data = request.json
+        mensaje = data.get('mensaje', '')
+        
+        print(f"\n{'='*60}")
+        print(f"🤵 HEADHUNTER: '{mensaje}'")
+        print(f"{'='*60}")
+        
+        # ===== PASO 1: DETECTAR QUÉ ESTÁ BUSCANDO EL USUARIO =====
+        prompt_deteccion = f"""
+Eres un headhunter experto. Analiza esta pregunta de un cliente y determina EXACTAMENTE qué está buscando.
+
+Pregunta: "{mensaje}"
+
+Devuelve SOLO JSON con esta estructura:
+{{
+  "tipo": "rol" | "ubicacion" | "universidad" | "habilidad" | "empresa" | "experiencia" | "recomendacion" | "conteo" | "general",
+  "rol_buscado": "el rol específico (programador, gerente, secretaria, etc.)" o null,
+  "lugar": "lugar mencionado (Liberia, Cartago, San José, etc.)" o null,
+  "universidad": "universidad mencionada (UCR, TEC, UNA, etc.)" o null,
+  "habilidad": "habilidad mencionada (Java, Python, inglés, etc.)" o null,
+  "empresa": "empresa mencionada (Scotiabank, BAC, etc.)" o null,
+  "seniority": "senior | semi-senior | junior | null",
+  "min_experiencia": años mínimos de experiencia (número) o null,
+  "es_recomendacion": true si pide "mejor", "top", "recomienda", "el mejor",
+  "cantidad": número de resultados que pide (1 para "el mejor", 3 para "top 3", null para todos)
+}}
+
+Sé preciso. Si la pregunta es "programadores", el rol_buscado es "programador".
+Si es "gente de Cartago", el lugar es "Cartago".
+Si es "el mejor desarrollador", es_recomendacion es true y rol_buscado es "desarrollador".
+"""
+        
+        response_deteccion = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt_deteccion}],
+            temperature=0
+        )
+        
+        deteccion = safe_json_parse(response_deteccion.choices[0].message.content)
+        print(f"🔍 Cliente busca: {deteccion}")
+        
+        tipo = deteccion.get('tipo', 'general')
+        rol_buscado = deteccion.get('rol_buscado', '').lower() if deteccion.get('rol_buscado') else None
+        lugar = deteccion.get('lugar', '').lower() if deteccion.get('lugar') else None
+        universidad = deteccion.get('universidad', '').lower() if deteccion.get('universidad') else None
+        habilidad = deteccion.get('habilidad', '').lower() if deteccion.get('habilidad') else None
+        empresa = deteccion.get('empresa', '').lower() if deteccion.get('empresa') else None
+        seniority = deteccion.get('seniority', '').lower() if deteccion.get('seniority') else None
+        min_experiencia = deteccion.get('min_experiencia')
+        es_recomendacion = deteccion.get('es_recomendacion', False)
+        cantidad = deteccion.get('cantidad', 10)
+        
+        # ===== PASO 2: CONSTRUIR CONSULTA PARA EMBEDDINGS =====
+        terminos = []
+        if rol_buscado:
+            terminos.append(rol_buscado)
+        if lugar:
+            terminos.append(lugar)
+        if universidad:
+            terminos.append(universidad)
+        if habilidad:
+            terminos.append(habilidad)
+        if empresa:
+            terminos.append(empresa)
+        
+        consulta = " ".join(terminos) if terminos else mensaje
+        print(f"🔍 Consulta embeddings: '{consulta}'")
+        
+        # Buscar los 30 candidatos más relevantes
+        candidatos = buscar_por_embedding(consulta, 30)
+        print(f"✅ Encontrados {len(candidatos)} candidatos relacionados")
+        
+        if not candidatos:
+            return jsonify({
+                "success": True,
+                "respuesta": f"No encontré ningún candidato relacionado con '{mensaje}'. ¿Quieres que busque perfiles similares?"
+            })
+        
+        # ===== PASO 3: FILTRAR POR CRITERIOS ESPECÍFICOS =====
+        filtrados = []
+        
+        for c in candidatos:
+            incluir = True
+            razones = []
+            
+            # Extraer información del candidato
+            nombre = c.get('datos_crudos', {}).get('nombre', 'N/A')
+            profesion = c.get('datos_crudos', {}).get('profesion_escrita', '').lower()
+            perfil = c.get('interpretacion', {}).get('perfil_interpretado', '').lower()
+            rol_tipico = c.get('interpretacion', {}).get('rol_tipico', '').lower()
+            ubicacion = c.get('datos_crudos', {}).get('ubicacion', '').lower()
+            uni = c.get('datos_crudos', {}).get('universidad', '').lower()
+            habilidades = [h.lower() for h in c.get('interpretacion', {}).get('habilidades_clave', [])]
+            exp_text = c.get('interpretacion', {}).get('anos_experiencia_deducidos', '0')
+            seniority_cand = c.get('interpretacion', {}).get('seniority', '').lower()
+            
+            # Extraer años de experiencia
+            import re
+            años = 0
+            match = re.search(r'(\d+)', exp_text)
+            if match:
+                años = int(match.group(1))
+            
+            # Filtrar por rol
+            if rol_buscado and incluir:
+                if not (rol_buscado in profesion or rol_buscado in perfil or rol_buscado in rol_tipico):
+                    # No descartar completamente, pero marcar como menos relevante
+                    pass
+            
+            # Filtrar por ubicación
+            if lugar and incluir:
+                if lugar not in ubicacion:
+                    incluir = False
+                    razones.append(f"no vive en {lugar}")
+            
+            # Filtrar por universidad
+            if universidad and incluir:
+                if universidad not in uni:
+                    incluir = False
+                    razones.append(f"no estudió en {universidad}")
+            
+            # Filtrar por habilidad
+            if habilidad and incluir:
+                if not any(habilidad in h for h in habilidades):
+                    # No descartar, pero afectará el score
+                    pass
+            
+            # Filtrar por empresa
+            if empresa and incluir:
+                exp_texto = c.get('datos_crudos', {}).get('experiencia_texto', '').lower()
+                if empresa not in exp_texto:
+                    incluir = False
+                    razones.append(f"no trabajó en {empresa}")
+            
+            # Filtrar por experiencia mínima
+            if min_experiencia and incluir:
+                if años < min_experiencia:
+                    incluir = False
+                    razones.append(f"solo tiene {años} años de experiencia")
+            
+            # Calcular score de relevancia
+            score_base = c.get('similitud_semantica', 50)
+            
+            # Bonus por coincidencia de rol
+            if rol_buscado and (rol_buscado in profesion or rol_buscado in perfil):
+                score_base += 20
+            
+            # Bonus por seniority
+            if seniority and seniority in seniority_cand:
+                score_base += 15
+            
+            # Bonus por habilidad
+            if habilidad and any(habilidad in h for h in habilidades):
+                score_base += 10
+            
+            c['score_final'] = min(100, score_base)
+            c['años'] = años
+            c['seniority_cand'] = seniority_cand
+            c['razones_exclusion'] = razones if not incluir else []
+            
+            if incluir:
+                filtrados.append(c)
+        
+        # ===== PASO 4: SI NO HAY FILTRADOS, USAR LOS MÁS CERCANOS =====
+        if not filtrados and candidatos:
+            # Tomar los 5 mejores aunque no cumplan todos los filtros
+            filtrados = candidatos[:5]
+            for c in filtrados:
+                c['score_final'] = c.get('similitud_semantica', 50)
+            modo_fallback = True
+        else:
+            modo_fallback = False
+        
+        # Ordenar por score final
+        filtrados.sort(key=lambda x: x['score_final'], reverse=True)
+        
+        # Limitar a la cantidad solicitada
+        if cantidad and cantidad < len(filtrados):
+            filtrados = filtrados[:cantidad]
+        
+        # ===== PASO 5: PREPARAR CONTEXTO PARA EL HEADHUNTER =====
+        contexto = f"**Cliente pregunta:** '{mensaje}'\n\n"
+        contexto += f"**Mi análisis:** Busca {tipo}"
+        if rol_buscado:
+            contexto += f" - Rol: {rol_buscado}"
+        if lugar:
+            contexto += f" - Lugar: {lugar}"
+        if universidad:
+            contexto += f" - Universidad: {universidad}"
+        if habilidad:
+            contexto += f" - Habilidad: {habilidad}"
+        if seniority:
+            contexto += f" - Seniority: {seniority}"
+        if min_experiencia:
+            contexto += f" - Mínimo {min_experiencia} años"
+        contexto += "\n\n"
+        
+        if modo_fallback:
+            contexto += "⚠️ **Nota:** No encontré candidatos que cumplan exactamente todos los criterios. Te muestro los más cercanos:\n\n"
+        else:
+            contexto += f"✅ **Encontré {len(filtrados)} candidatos que cumplen tus criterios:**\n\n"
+        
+        for i, c in enumerate(filtrados[:8]):  # Mostrar máximo 8 en el contexto
+            nombre = c.get('datos_crudos', {}).get('nombre', 'N/A')
+            profesion = c.get('datos_crudos', {}).get('profesion_escrita', 'N/A')
+            score = c.get('score_final', c.get('similitud_semantica', 0))
+            años = c.get('años', 0)
+            seniority_cand = c.get('seniority_cand', 'No especificado')
+            ubicacion = c.get('datos_crudos', {}).get('ubicacion', 'N/A')
+            universidad_cand = c.get('datos_crudos', {}).get('universidad', 'N/A')
+            habilidades = c.get('interpretacion', {}).get('habilidades_clave', [])[:4]
+            
+            contexto += f"**{i+1}. {nombre}**\n"
+            contexto += f"   📋 Perfil: {profesion}\n"
+            contexto += f"   📊 Compatibilidad: {score:.0f}%\n"
+            contexto += f"   📍 Ubicación: {ubicacion}\n"
+            if universidad_cand != 'N/A':
+                contexto += f"   🎓 Universidad: {universidad_cand}\n"
+            contexto += f"   ⏱️ Experiencia: {años} años ({seniority_cand})\n"
+            if habilidades:
+                contexto += f"   🔧 Habilidades: {', '.join(habilidades)}\n"
+            contexto += "\n"
+        
+        if len(filtrados) > 8:
+            contexto += f"... y {len(filtrados) - 8} más.\n\n"
+        
+        # ===== PASO 6: EL HEADHUNTER DA SU OPINIÓN =====
+        prompt_headhunter = f"""
+Eres un headhunter con MÁS DE 20 AÑOS DE EXPERIENCIA. Has reclutado para cientos de empresas y tienes un ojo clínico para el talento.
+
+{contexto}
+
+Ahora, ACTÚA COMO HEADHUNTER y responde al cliente. Tu respuesta debe incluir:
+
+1. **MI ANÁLISIS PROFESIONAL**: ¿Qué opinas de este grupo de candidatos? ¿Hay realmente lo que busca?
+
+2. **MI RECOMENDACIÓN**: ¿A quién recomendarías y POR QUÉ? (sé específico, menciona nombres y fortalezas concretas)
+
+3. **COMPARATIVA**: ¿Cómo se comparan entre sí? (fortalezas/debilidades relativas)
+
+4. **CONSEJO DE EXPERTO**: ¿Alguna sugerencia para su proceso de selección o para ajustar la búsqueda?
+
+**REGLAS DE ORO:**
+- Habla en PRIMERA PERSONA ("Yo recomiendo...", "Mi experiencia me dice...")
+- Sé 100% honesto. Si no hay candidatos ideales, DILO CLARAMENTE.
+- No inventes perfiles que no existen.
+- Usa tu criterio de experto para DESTACAR al mejor candidato.
+- Menciona nombres específicos cuando corresponda.
+- Sé conversacional pero profesional.
+
+Responde como el headhunter experto que eres.
+"""
+        
+        response_headhunter = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt_headhunter}],
+            temperature=0.7,
+            max_tokens=800
+        )
+        
+        opinion = response_headhunter.choices[0].message.content
+        
+        return jsonify({
+            "success": True,
+            "respuesta": opinion,
+            "stats": {
+                "encontrados": len(filtrados),
+                "total_busqueda": len(candidatos),
+                "modo_fallback": modo_fallback
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en asistente: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/migrar-experiencia", methods=["GET"])
+def migrar_experiencia():
+    """Migra candidatos antiguos: extrae experiencia_laboral y empresas usando IA"""
+    try:
+        candidatos = load_all_candidates_from_db()
+        resultados = []
+        
+        for c in candidatos:
+            c_id = c.get('id')
+            nombre = c.get('datos_crudos', {}).get('nombre', 'Sin nombre')
+            
+            # Verificar si ya tiene experiencia_laboral
+            if 'experiencia_laboral' in c.get('datos_crudos', {}):
+                resultados.append({
+                    "id": c_id,
+                    "nombre": nombre,
+                    "estado": "ya tiene estructura",
+                    "empresas": c['datos_crudos'].get('empresas', [])
+                })
+                continue
+            
+            # Si no tiene, extraer del experiencia_texto
+            exp_texto = c.get('datos_crudos', {}).get('experiencia_texto', '')
+            if not exp_texto:
+                resultados.append({
+                    "id": c_id,
+                    "nombre": nombre,
+                    "estado": "sin experiencia_texto"
+                })
+                continue
+            
+            print(f"🤖 Extrayendo experiencia para {nombre}...")
+            
+            prompt = f"""
+Del siguiente texto de experiencia laboral, extrae CADA trabajo como un objeto estructurado.
+
+TEXTO:
+{exp_texto[:3000]}
+
+Devuelve SOLO JSON con:
+{{
+  "experiencia_laboral": [
+    {{
+      "puesto": "cargo",
+      "empresa": "nombre empresa",
+      "fecha_inicio": "año o fecha",
+      "fecha_fin": "año o fecha",
+      "descripcion": "descripción breve"
+    }}
+  ],
+  "empresas": ["lista única de empresas"]
+}}
+
+Si no hay información, devuelve listas vacías.
+"""
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=500
+            )
+            
+            contenido = response.choices[0].message.content
+            import re, json
+            json_match = re.search(r'\{.*\}', contenido, re.DOTALL)
+            
+            if json_match:
+                resultado = json.loads(json_match.group())
+                
+                # Actualizar el candidato en la base de datos
+                if 'datos_crudos' not in c:
+                    c['datos_crudos'] = {}
+                
+                c['datos_crudos']['experiencia_laboral'] = resultado.get('experiencia_laboral', [])
+                c['datos_crudos']['empresas'] = resultado.get('empresas', [])
+                
+                # Guardar en SQLite
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE candidates SET raw_data = ? WHERE id = ?
+                ''', (json.dumps(c, ensure_ascii=False), c_id))
+                conn.commit()
+                conn.close()
+                
+                # Regenerar embedding
+                generar_embedding_candidato(c, c_id)
+                
+                resultados.append({
+                    "id": c_id,
+                    "nombre": nombre,
+                    "estado": "migrado",
+                    "experiencias": len(c['datos_crudos']['experiencia_laboral']),
+                    "empresas": c['datos_crudos']['empresas']
+                })
+            else:
+                resultados.append({
+                    "id": c_id,
+                    "nombre": nombre,
+                    "estado": "error parseando respuesta"
+                })
+        
+        return jsonify({
+            "success": True,
+            "migracion": resultados
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en migración: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500    
+    
+
+@app.route("/api/debug-candidato", methods=["GET"])
+def debug_candidato():
+    """Depura cualquier candidato - muestra su experiencia_texto y empresas"""
+    try:
+        # Obtener parámetros de búsqueda
+        candidato_id = request.args.get('id', type=int)
+        nombre_buscar = request.args.get('nombre', '')
+        
+        candidatos = load_all_candidates_from_db()
+        resultados = []
+        
+        for c in candidatos:
+            # Obtener datos básicos
+            c_id = c.get('id')
+            nombre = c.get('datos_crudos', {}).get('nombre', 'Sin nombre')
+            exp_texto = c.get('datos_crudos', {}).get('experiencia_texto', '')
+            empresas = c.get('datos_crudos', {}).get('empresas', [])
+            
+            # Verificar si coincide con la búsqueda
+            coincide = False
+            if candidato_id and c_id == candidato_id:
+                coincide = True
+            elif nombre_buscar and nombre_buscar.lower() in nombre.lower():
+                coincide = True
+            elif not candidato_id and not nombre_buscar:
+                # Si no hay filtros, mostrar todos (limitado)
+                coincide = True
+            
+            if coincide:
+                # Extraer posibles empresas del texto (para comparar)
+                import re
+                posibles_empresas = []
+                if exp_texto:
+                    # Buscar palabras con mayúsculas que podrían ser empresas
+                    palabras = exp_texto.split()
+                    for palabra in palabras[:20]:  # Solo primeras 20 para no saturar
+                        limpia = re.sub(r'[.,;:!?()]', '', palabra)
+                        if len(limpia) > 3 and limpia[0].isupper() and limpia[0] != limpia[0].lower():
+                            if limpia not in ['Trabajé', 'Experiencia', 'Laboré', 'Durante', 'Como', 'Para', 'En', 'El', 'La', 'Los', 'Las']:
+                                posibles_empresas.append(limpia)
+                
+                resultados.append({
+                    "id": c_id,
+                    "nombre": nombre,
+                    "longitud_experiencia": len(exp_texto),
+                    "primeros_200": exp_texto[:200] + "..." if len(exp_texto) > 200 else exp_texto,
+                    "empresas_guardadas": empresas,
+                    "empresas_detectadas_texto": posibles_empresas[:10],
+                    "tiene_empresas": len(empresas) > 0
+                })
+        
+        if not resultados:
+            return jsonify({
+                "success": False,
+                "error": "No se encontraron candidatos con ese criterio"
+            })
+        
+        return jsonify({
+            "success": True,
+            "total_encontrados": len(resultados),
+            "candidatos": resultados
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en debug: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500  
+
+@app.route("/api/match-empleo", methods=["POST"])
+def match_empleo():
+    """Encuentra los mejores candidatos para una descripción de empleo"""
+    try:
+        data = request.json
+        descripcion = data.get('descripcion', '')
+        titulo = data.get('titulo', 'Posición')
+        cantidad = data.get('cantidad', 10)
+        
+        print(f"\n{'='*60}")
+        print(f"🎯 MATCH EMPLEO: {titulo}")
+        print(f"📝 Descripción: {descripcion[:200]}...")
+        print(f"{'='*60}")
+        
+        # Paso 1: Usar IA para extraer keywords de la descripción
+        prompt_keywords = f"""
+Eres un experto en reclutamiento. Analiza esta descripción de empleo y extrae las palabras clave más importantes para buscar candidatos.
+
+Título: {titulo}
+Descripción: {descripcion}
+
+Devuelve SOLO JSON con:
+{{
+  "keywords": ["palabra1", "palabra2"],
+  "habilidades_requeridas": ["skill1", "skill2"],
+  "seniority": "junior" | "semi-senior" | "senior" | "lead",
+  "años_experiencia": número,
+  "sector": "industria"
+}}
+"""
+        response_keywords = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt_keywords}],
+            temperature=0
+        )
+        
+        keywords_data = safe_json_parse(response_keywords.choices[0].message.content)
+        print(f"🔑 Keywords extraídas: {keywords_data}")
+        
+        # Paso 2: Construir consulta para embeddings
+        consulta = " ".join(keywords_data.get('keywords', []))
+        if not consulta:
+            consulta = descripcion[:200]
+        
+        # Buscar candidatos (más de los necesarios para luego filtrar)
+        candidatos = buscar_por_embedding(consulta, cantidad * 3)
+        
+        # Paso 3: Calcular match score para cada candidato
+        resultados = []
+        for c in candidatos:
+            # Score base de similitud semántica
+            score = c.get('similitud_semantica', 50)
+            
+            # Extraer años de experiencia
+            exp_text = c.get('interpretacion', {}).get('anos_experiencia_deducidos', '0')
+            import re
+            años = 0
+            match = re.search(r'(\d+)', exp_text)
+            if match:
+                años = int(match.group(1))
+            
+            # Bonus por seniority
+            seniority_cand = c.get('interpretacion', {}).get('seniority', '').lower()
+            seniority_req = keywords_data.get('seniority', '').lower()
+            if seniority_req and seniority_req in seniority_cand:
+                score += 15
+            
+            # Bonus por años de experiencia
+            req_años = keywords_data.get('años_experiencia', 0)
+            if req_años and años >= req_años:
+                score += 10
+            elif req_años and años >= req_años - 2:
+                score += 5
+            
+            # Bonus por habilidades requeridas
+            habilidades_req = keywords_data.get('habilidades_requeridas', [])
+            if habilidades_req:
+                habilidades_cand = c.get('interpretacion', {}).get('habilidades_clave', [])
+                habilidades_cand_low = [h.lower() for h in habilidades_cand]
+                
+                for hab in habilidades_req:
+                    if hab.lower() in habilidades_cand_low:
+                        score += 10
+            
+            # Score final
+            c['match_score'] = round(min(100, score), 1)
+            c['años_exp'] = años
+            resultados.append(c)
+        
+        # Ordenar por match score
+        resultados.sort(key=lambda x: x['match_score'], reverse=True)
+        
+        # Tomar los mejores
+        mejores = resultados[:cantidad]
+        
+        print(f"✅ Mejores matches: {len(mejores)} candidatos")
+        
+        return jsonify({
+            "success": True,
+            "empleo": {
+                "titulo": titulo,
+                "descripcion": descripcion[:200],
+                "keywords": keywords_data
+            },
+            "candidatos": mejores,
+            "total": len(mejores)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en match empleo: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500    
+
+# =========================
+# ENDPOINTS PARA ENTREVISTAS EN VIDEO
+# =========================
+
+@app.route("/api/admin/plantillas", methods=["GET"])
+def obtener_plantillas():
+    """Obtiene todas las plantillas de entrevista"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, nombre, puesto, tipo, fecha_creacion, activa
+            FROM plantillas_entrevista
+            ORDER BY fecha_creacion DESC
+        ''')
+        
+        plantillas = []
+        for row in cursor.fetchall():
+            plantillas.append({
+                "id": row[0],
+                "nombre": row[1],
+                "puesto": row[2],
+                "tipo": row[3],
+                "fecha_creacion": row[4],
+                "activa": bool(row[5])
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "plantillas": plantillas})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/admin/plantilla", methods=["POST"])
+def crear_plantilla():
+    """Crea una nueva plantilla de entrevista"""
+    try:
+        data = request.json
+        nombre = data.get('nombre')
+        puesto = data.get('puesto')
+        tipo = data.get('tipo', 'generica')
+        preguntas = data.get('preguntas', [])
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO plantillas_entrevista (nombre, puesto, tipo, fecha_creacion)
+            VALUES (?, ?, ?, ?)
+        ''', (nombre, puesto, tipo, datetime.now()))
+        
+        plantilla_id = cursor.lastrowid
+        
+        for orden, p in enumerate(preguntas):
+            cursor.execute('''
+                INSERT INTO banco_preguntas 
+                (plantilla_id, pregunta, categoria, orden, tiempo_maximo)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (plantilla_id, p.get('pregunta'), p.get('categoria', 'general'), 
+                  orden, p.get('tiempo_maximo', 120)))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "plantilla_id": plantilla_id})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/admin/plantilla/<int:plantilla_id>", methods=["GET"])
+def obtener_plantilla(plantilla_id):
+    """Obtiene una plantilla con sus preguntas"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, nombre, puesto, tipo, fecha_creacion
+            FROM plantillas_entrevista
+            WHERE id = ?
+        ''', (plantilla_id,))
+        
+        plantilla_row = cursor.fetchone()
+        if not plantilla_row:
+            return jsonify({"success": False, "error": "Plantilla no encontrada"}), 404
+        
+        cursor.execute('''
+            SELECT id, pregunta, categoria, orden, tiempo_maximo
+            FROM banco_preguntas
+            WHERE plantilla_id = ?
+            ORDER BY orden
+        ''', (plantilla_id,))
+        
+        preguntas = []
+        for row in cursor.fetchall():
+            preguntas.append({
+                "id": row[0],
+                "pregunta": row[1],
+                "categoria": row[2],
+                "orden": row[3],
+                "tiempo_maximo": row[4]
+            })
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "plantilla": {
+                "id": plantilla_row[0],
+                "nombre": plantilla_row[1],
+                "puesto": plantilla_row[2],
+                "tipo": plantilla_row[3],
+                "fecha_creacion": plantilla_row[4],
+                "preguntas": preguntas
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/iniciar", methods=["POST"])
+def iniciar_entrevista():
+    """Crea una nueva entrevista y genera token para el candidato"""
+    try:
+        data = request.json
+        candidato_id = data.get('candidato_id')
+        plantilla_id = data.get('plantilla_id')
+        
+        token = secrets.token_urlsafe(32)
+        base_url = request.host_url.rstrip('/')
+        enlace = f"{base_url}/entrevista-candidato.html?token={token}"
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO entrevistas 
+            (candidato_id, plantilla_id, token_acceso, fecha_inicio, estado, enlace_compartido)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (candidato_id, plantilla_id, token, datetime.now(), 'pendiente', enlace))
+        
+        entrevista_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "entrevista_id": entrevista_id,
+            "enlace": enlace,
+            "token": token
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/candidato/<token>", methods=["GET"])
+def obtener_entrevista_candidato(token):
+    """El candidato accede con su token y obtiene las preguntas"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Obtener la entrevista
+        cursor.execute('''
+            SELECT e.id, e.estado, e.fecha_inicio, e.plantilla_id,
+                   c.nombre, c.id as candidato_id
+            FROM entrevistas e
+            JOIN candidates c ON e.candidato_id = c.id
+            WHERE e.token_acceso = ?
+        ''', (token,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
+        
+        entrevista_id = row[0]
+        estado = row[1]
+        plantilla_id = row[3]
+        candidato_nombre = row[4]
+        candidato_id = row[5]
+        
+        # 2. Verificar estado
+        if estado != 'pendiente':
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": f"Esta entrevista ya fue {estado}. Estado actual: {estado}"
+            }), 400
+        
+        # 3. Obtener nombre de la plantilla
+        cursor.execute('SELECT nombre, puesto FROM plantillas_entrevista WHERE id = ?', (plantilla_id,))
+        plantilla_info = cursor.fetchone()
+        plantilla_nombre = plantilla_info[0] if plantilla_info else 'Entrevista'
+        plantilla_puesto = plantilla_info[1] if plantilla_info else None
+        
+        # 4. Obtener preguntas de la plantilla
+        cursor.execute('''
+            SELECT id, pregunta, categoria, tiempo_maximo
+            FROM banco_preguntas
+            WHERE plantilla_id = ?
+            ORDER BY orden
+        ''', (plantilla_id,))
+        
+        preguntas_rows = cursor.fetchall()
+        preguntas = []
+        for row in preguntas_rows:
+            preguntas.append({
+                "id": row[0],
+                "pregunta": row[1],
+                "categoria": row[2] or 'general',
+                "tiempo_maximo": row[3] or 120
+            })
+        
+        print(f"📋 Preguntas encontradas para plantilla {plantilla_id}: {len(preguntas)}")
+        
+        # 5. Verificar que hay preguntas
+        if len(preguntas) == 0:
+            conn.close()
+            print(f"⚠️ ¡La plantilla '{plantilla_nombre}' (ID: {plantilla_id}) NO TIENE PREGUNTAS!")
+            return jsonify({
+                "success": False,
+                "error": f"La plantilla '{plantilla_nombre}' no tiene preguntas configuradas"
+            }), 400
+        
+        # 6. Actualizar estado a 'en_progreso'
+        cursor.execute('''
+            UPDATE entrevistas SET estado = 'en_progreso' WHERE id = ?
+        ''', (entrevista_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "entrevista": {
+                "id": entrevista_id,
+                "candidato_nombre": candidato_nombre,
+                "candidato_id": candidato_id,
+                "plantilla_nombre": plantilla_nombre,
+                "puesto": plantilla_puesto,
+                "preguntas": preguntas,
+                "total_preguntas": len(preguntas)
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en obtener_entrevista_candidato: {e}")
+        import traceback
+        traceback.print_exc()
+        # Asegurar que la conexión se cierre en caso de error
+        try:
+            conn.close()
+        except:
+            pass
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+@app.route("/api/debug/plantilla/<int:plantilla_id>", methods=["GET"])
+def debug_plantilla(plantilla_id):
+    """Endpoint temporal para ver qué tiene una plantilla"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Información de la plantilla
+        cursor.execute('SELECT * FROM plantillas_entrevista WHERE id = ?', (plantilla_id,))
+        plantilla = cursor.fetchone()
+        
+        # Preguntas
+        cursor.execute('SELECT * FROM banco_preguntas WHERE plantilla_id = ?', (plantilla_id,))
+        preguntas = cursor.fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "plantilla": plantilla,
+            "preguntas": preguntas,
+            "total_preguntas": len(preguntas)
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500    
+
+@app.route("/api/entrevista/candidato/responder", methods=["POST"])
+def guardar_respuesta_candidato():
+    """El candidato envía su respuesta en video"""
+    try:
+        token = request.form.get('token')
+        pregunta_id = request.form.get('pregunta_id')
+        pregunta_texto = request.form.get('pregunta_texto')
+        transcripcion = request.form.get('transcripcion', '')
+        tiempo = request.form.get('tiempo', 0)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT e.id FROM entrevistas e
+            WHERE e.token_acceso = ? AND e.estado = 'en_progreso'
+        ''', (token,))
+        
+        entrevista = cursor.fetchone()
+        if not entrevista:
+            return jsonify({"success": False, "error": "Entrevista no válida"}), 400
+        
+        entrevista_id = entrevista[0]
+        
+        filename = None
+        if 'video' in request.files:
+            video_file = request.files['video']
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"entrevista_{entrevista_id}_pregunta_{pregunta_id}_{timestamp}.webm"
+            filepath = os.path.join(VIDEO_UPLOAD_FOLDER, filename)
+            video_file.save(filepath)
+            print(f"✅ Video guardado: {filename}")
+        
+        cursor.execute('''
+            INSERT INTO respuestas_entrevista 
+            (entrevista_id, pregunta_id, pregunta_texto, respuesta_texto, 
+             respuesta_video_path, tiempo_respuesta)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (entrevista_id, pregunta_id, pregunta_texto, transcripcion, filename, tiempo))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True})
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/candidato/finalizar", methods=["POST"])
+def finalizar_entrevista_candidato():
+    """El candidato finaliza la entrevista"""
+    try:
+        token = request.json.get('token')
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE entrevistas 
+            SET estado = 'completada', fecha_fin = ?
+            WHERE token_acceso = ?
+        ''', (datetime.now(), token))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/resultados/<int:candidato_id>", methods=["GET"])
+def obtener_resultados_entrevista(candidato_id):
+    """Obtiene los resultados de las entrevistas de un candidato"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT e.id, e.fecha_inicio, e.fecha_fin, e.estado, 
+                   e.analisis_ia, e.puntuacion_global,
+                   p.nombre as plantilla, p.puesto
+            FROM entrevistas e
+            JOIN plantillas_entrevista p ON e.plantilla_id = p.id
+            WHERE e.candidato_id = ?
+            ORDER BY e.fecha_inicio DESC
+        ''', (candidato_id,))
+        
+        resultados = []
+        for row in cursor.fetchall():
+            resultados.append({
+                "id": row[0],
+                "fecha": row[1],
+                "fecha_fin": row[2],
+                "estado": row[3],
+                "analisis": json.loads(row[4]) if row[4] else None,
+                "puntuacion": row[5],
+                "plantilla": row[6],
+                "puesto": row[7]
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "resultados": resultados})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/analizar/<int:entrevista_id>", methods=["POST"])
+def analizar_entrevista(entrevista_id):
+    """Analiza la entrevista con IA"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT r.pregunta_texto, r.respuesta_texto, r.tiempo_respuesta
+            FROM respuestas_entrevista r
+            WHERE r.entrevista_id = ?
+            ORDER BY r.id
+        ''', (entrevista_id,))
+        
+        respuestas = cursor.fetchall()
+        
+        transcripcion = ""
+        for i, (pregunta, respuesta, tiempo) in enumerate(respuestas):
+            transcripcion += f"\nPREGUNTA {i+1}: {pregunta}\n"
+            transcripcion += f"RESPUESTA: {respuesta}\n"
+            if tiempo:
+                transcripcion += f"TIEMPO: {tiempo} segundos\n"
+            transcripcion += "-" * 50 + "\n"
+        
+        prompt = f"""
+Eres un headhunter experto con 20 años de experiencia. Analiza esta entrevista:
+
+{transcripcion}
+
+Proporciona un análisis en JSON con:
+{{
+  "fortalezas": ["lista de fortalezas detectadas"],
+  "debilidades": ["lista de áreas de mejora"],
+  "impresion_general": "texto con impresión general",
+  "recomendacion": "contratar / considerar / no_contratar",
+  "puntuacion": número del 1 al 10,
+  "preguntas_destacadas": [índices de preguntas donde destacó],
+  "preguntas_debiles": [índices de preguntas con dificultad]
+}}
+"""
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        
+        analisis = safe_json_parse(response.choices[0].message.content)
+        
+        cursor.execute('''
+            UPDATE entrevistas 
+            SET analisis_ia = ?, puntuacion_global = ?, estado = 'analizada'
+            WHERE id = ?
+        ''', (json.dumps(analisis, ensure_ascii=False), 
+              analisis.get('puntuacion'), entrevista_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "analisis": analisis})
+        
+    except Exception as e:
+        print(f"❌ Error analizando entrevista: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevista/video/<filename>", methods=["GET"])
+def obtener_video_entrevista(filename):
+    """Sirve el archivo de video de una respuesta"""
+    try:
+        from urllib.parse import unquote
+        filename = unquote(filename)
+        file_path = os.path.join(VIDEO_UPLOAD_FOLDER, filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({"success": False, "error": "Video no encontrado"}), 404
+        
+        return send_file(file_path, mimetype='video/webm')
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500   
+
+
+@app.route("/api/entrevistas/candidato/<int:candidato_id>", methods=["GET"])
+def listar_entrevistas_candidato(candidato_id):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, token_acceso, fecha_inicio, estado, enlace_compartido
+            FROM entrevistas
+            WHERE candidato_id = ?
+            ORDER BY fecha_inicio DESC
+        ''', (candidato_id,))
+        
+        entrevistas = []
+        for row in cursor.fetchall():
+            entrevistas.append({
+                "id": row[0],
+                "token": row[1],
+                "fecha": row[2],
+                "estado": row[3],
+                "enlace": row[4]
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "entrevistas": entrevistas})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500     
+
+
+@app.route("/api/entrevista/resultado-detallado/<int:entrevista_id>", methods=["GET"])
+def resultado_entrevista_detallado(entrevista_id):
+    """Obtiene el resultado detallado de una entrevista con análisis IA"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Obtener información de la entrevista
+        cursor.execute('''
+            SELECT e.id, e.fecha_inicio, e.fecha_fin, e.estado, 
+                   e.analisis_ia, e.puntuacion_global,
+                   p.nombre as plantilla, p.puesto,
+                   c.nombre as candidato_nombre, c.id as candidato_id,
+                   c.raw_data
+            FROM entrevistas e
+            JOIN plantillas_entrevista p ON e.plantilla_id = p.id
+            JOIN candidates c ON e.candidato_id = c.id
+            WHERE e.id = ?
+        ''', (entrevista_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
+        
+        # 2. Obtener todas las respuestas
+        cursor.execute('''
+            SELECT r.pregunta_texto, r.respuesta_texto, r.tiempo_respuesta,
+                   r.respuesta_video_path, r.analisis_pregunta, r.puntuacion_pregunta,
+                   r.id
+            FROM respuestas_entrevista r
+            WHERE r.entrevista_id = ?
+            ORDER BY r.id
+        ''', (entrevista_id,))
+        
+        respuestas = []
+        for r in cursor.fetchall():
+            respuestas.append({
+                "pregunta": r[0],
+                "respuesta": r[1],
+                "tiempo": r[2],
+                "video": r[3],
+                "analisis": json.loads(r[4]) if r[4] else None,
+                "puntuacion": r[5],
+                "id": r[6]
+            })
+        
+        conn.close()
+        
+        # 3. Parsear datos del candidato
+        candidato_data = json.loads(row[10]) if row[10] else {}
+        
+        # 4. Si no hay análisis IA, generarlo ahora
+        analisis = None
+        if row[4]:
+            analisis = json.loads(row[4])
+        else:
+            # Generar análisis automático
+            prompt = f"""
+Eres un headhunter experto con 20 años de experiencia. Analiza esta entrevista completa:
+
+Candidato: {row[8]}
+Puesto: {row[7] if row[7] else 'No especificado'}
+
+RESPUESTAS:
+{chr(10).join([f"Pregunta: {r['pregunta']}\nRespuesta: {r['respuesta']}\n" for r in respuestas])}
+
+Proporciona un análisis PROFESIONAL y DETALLADO en JSON con:
+{{
+  "impresion_general": "texto detallado de impresión general",
+  "fortalezas_destacadas": ["lista de fortalezas clave observadas"],
+  "areas_oportunidad": ["lista de áreas de mejora"],
+  "analisis_por_pregunta": [
+    {{
+      "pregunta": "texto de la pregunta",
+      "evaluacion": "análisis de la respuesta",
+      "puntuacion": 0-10,
+      "aspectos_positivos": ["lista"],
+      "aspectos_mejorar": ["lista"]
+    }}
+  ],
+  "coherencia_perfil": "análisis de coherencia con el CV",
+  "recomendacion_final": "contratar / considerar / no_contratar",
+  "puntuacion_global": 0-100,
+  "nivel_ingles": "avanzado/intermedio/básico/no detectable",
+  "habilidades_blandas": ["lista"],
+  "habilidades_tecnicas": ["lista"],
+  "observaciones_especiales": "cualquier observación relevante"
+}}
+"""
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=1500
+                )
+                analisis = safe_json_parse(response.choices[0].message.content)
+                
+                # Guardar análisis en BD
+                conn2 = sqlite3.connect(DB_PATH)
+                cur2 = conn2.cursor()
+                cur2.execute('''
+                    UPDATE entrevistas 
+                    SET analisis_ia = ?, puntuacion_global = ?
+                    WHERE id = ?
+                ''', (json.dumps(analisis, ensure_ascii=False), 
+                      analisis.get('puntuacion_global', 0), entrevista_id))
+                conn2.commit()
+                conn2.close()
+            except Exception as e:
+                print(f"❌ Error generando análisis: {e}")
+                analisis = None
+        
+        return jsonify({
+            "success": True,
+            "entrevista": {
+                "id": row[0],
+                "fecha": row[1],
+                "fecha_fin": row[2],
+                "estado": row[3],
+                "analisis": analisis,
+                "puntuacion": row[5],
+                "plantilla": row[6],
+                "puesto": row[7],
+                "candidato_nombre": row[8],
+                "candidato_id": row[9],
+                "candidato_data": candidato_data
+            },
+            "respuestas": respuestas
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500                       
+
+
+# =========================
+# RUTAS PARA PÁGINAS HTML
+# =========================
+
+@app.route('/<path:path>.html')
+def serve_html(path):
+    """Sirve archivos HTML estáticos desde templates/"""
+    try:
+        return render_template(f"{path}.html")
+    except Exception as e:
+        return f"Error: {e}", 404
+
+@app.route('/test')
+def test():
+    return "<h1>HOLA MUNDO</h1><p>Si ves esto, Flask funciona</p>"
+
+@app.route('/entrevista-admin.html')
+def admin_page():
+    return render_template('entrevista-admin.html')
+
+@app.route('/entrevista-candidato.html')
+def candidato_page():
+    return render_template('entrevista-candidato.html')
+
+
+@app.route('/entrevista-admin.html')
+def admin_entrevista():
+    return render_template('entrevista-admin.html')
+
+@app.route('/entrevista-candidato.html')
+def candidato_entrevista():
+    return render_template('entrevista-candidato.html')
+
+@app.route('/test.html')
+def test_page():
+    return render_template('test.html')
+
+
+# ========================================
+# ENDPOINTS PARA ENTREVISTAS DASHBOARD
+# ========================================
+
+@app.route("/api/entrevistas/todas", methods=["GET"])
+def obtener_todas_entrevistas():
+    """Obtiene todas las entrevistas con información de candidatos"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Consulta para obtener entrevistas con datos de candidatos y plantillas
+        cursor.execute('''
+            SELECT 
+                e.id,
+                e.candidato_id,
+                e.fecha_inicio,
+                e.fecha_fin,
+                e.estado,
+                e.puntuacion_global,
+                e.analisis_ia,
+                c.nombre as candidato_nombre,
+                c.profesion as candidato_profesion,
+                p.nombre as plantilla_nombre,
+                p.puesto,
+                (SELECT COUNT(*) FROM respuestas_entrevista WHERE entrevista_id = e.id) as total_respuestas,
+                (SELECT SUM(tiempo_respuesta) FROM respuestas_entrevista WHERE entrevista_id = e.id) as duracion_total
+            FROM entrevistas e
+            LEFT JOIN candidates c ON e.candidato_id = c.id
+            LEFT JOIN plantillas_entrevista p ON e.plantilla_id = p.id
+            ORDER BY e.fecha_inicio DESC
+        ''')
+        
+        entrevistas = []
+        for row in cursor.fetchall():
+            # Parsear análisis si existe
+            analisis = None
+            if row[6]:
+                try:
+                    analisis = json.loads(row[6])
+                except:
+                    analisis = None
+            
+            entrevistas.append({
+                "id": row[0],
+                "candidato_id": row[1],
+                "fecha_inicio": row[2],
+                "fecha_fin": row[3],
+                "estado": row[4],
+                "puntuacion_global": row[5],
+                "analisis_ia": analisis,
+                "candidato_nombre": row[7],
+                "candidato_profesion": row[8],
+                "plantilla": row[9],
+                "puesto": row[10],
+                "total_respuestas": row[11],
+                "duracion": row[12]
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "entrevistas": entrevistas})
+        
+    except Exception as e:
+        print(f"❌ Error en obtener_todas_entrevistas: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/entrevista/reporte-completo/<int:entrevista_id>", methods=["GET"])
+def reporte_entrevista_completo(entrevista_id):
+    """Obtiene reporte completo de una entrevista con respuestas"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Obtener información de la entrevista
+        cursor.execute('''
+            SELECT 
+                e.id,
+                e.candidato_id,
+                e.fecha_inicio,
+                e.fecha_fin,
+                e.estado,
+                e.puntuacion_global,
+                e.analisis_ia,
+                e.transcripcion_completa,
+                c.nombre as candidato_nombre,
+                c.profesion as candidato_profesion,
+                c.raw_data,
+                p.nombre as plantilla_nombre,
+                p.puesto
+            FROM entrevistas e
+            LEFT JOIN candidates c ON e.candidato_id = c.id
+            LEFT JOIN plantillas_entrevista p ON e.plantilla_id = p.id
+            WHERE e.id = ?
+        ''', (entrevista_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
+        
+        # 2. Obtener respuestas
+        cursor.execute('''
+            SELECT 
+                pregunta_texto,
+                respuesta_texto,
+                tiempo_respuesta,
+                respuesta_video_path,
+                analisis_pregunta,
+                puntuacion_pregunta
+            FROM respuestas_entrevista
+            WHERE entrevista_id = ?
+            ORDER BY id
+        ''', (entrevista_id,))
+        
+        respuestas = []
+        for r in cursor.fetchall():
+            respuestas.append({
+                "pregunta": r[0],
+                "respuesta": r[1],
+                "tiempo": r[2],
+                "video_url": f"/api/entrevista/video/{r[3]}" if r[3] else None,
+                "analisis": json.loads(r[4]) if r[4] else None,
+                "puntuacion": r[5]
+            })
+        
+        conn.close()
+        
+        # 3. Parsear análisis
+        analisis = None
+        if row[6]:
+            try:
+                analisis = json.loads(row[6])
+            except:
+                analisis = None
+        
+        # 4. Parsear raw_data del candidato (para fotos si existen)
+        candidato_data = None
+        if row[10]:
+            try:
+                candidato_data = json.loads(row[10])
+            except:
+                candidato_data = None
+        
+        # 5. Calcular duración total
+        duracion = sum(r.get('tiempo', 0) for r in respuestas)
+        
+        return jsonify({
+            "success": True,
+            "entrevista": {
+                "id": row[0],
+                "candidato_id": row[1],
+                "fecha": row[2],
+                "fecha_fin": row[3],
+                "estado": row[4],
+                "puntuacion_global": row[5],
+                "candidato_nombre": row[8],
+                "candidato_profesion": row[9],
+                "plantilla": row[11],
+                "puesto": row[12],
+                "duracion": duracion
+            },
+            "respuestas": respuestas,
+            "analisis": analisis,
+            "candidato_data": candidato_data,
+            "fotos": []  # Por ahora vacío, puedes extraer de candidato_data si guardas fotos
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en reporte_entrevista_completo: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/entrevistas/candidato/<int:candidato_id>", methods=["GET"])
+def obtener_entrevistas_por_candidato(candidato_id):
+    """Obtiene todas las entrevistas de un candidato específico"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                e.id,
+                e.token_acceso,
+                e.fecha_inicio,
+                e.fecha_fin,
+                e.estado,
+                e.puntuacion_global,
+                e.enlace_compartido,
+                p.nombre as plantilla_nombre,
+                p.puesto
+            FROM entrevistas e
+            JOIN plantillas_entrevista p ON e.plantilla_id = p.id
+            WHERE e.candidato_id = ?
+            ORDER BY e.fecha_inicio DESC
+        ''', (candidato_id,))
+        
+        entrevistas = []
+        for row in cursor.fetchall():
+            entrevistas.append({
+                "id": row[0],
+                "token": row[1],
+                "fecha_inicio": row[2],
+                "fecha_fin": row[3],
+                "estado": row[4],
+                "puntuacion": row[5],
+                "enlace": row[6],
+                "plantilla": row[7],
+                "puesto": row[8]
+            })
+        
+        conn.close()
+        return jsonify({"success": True, "entrevistas": entrevistas})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+# =========================
+# INICIO
+# =========================
+if __name__ == "__main__":
+    init_database()
+    app.run(debug=True, port=5001)

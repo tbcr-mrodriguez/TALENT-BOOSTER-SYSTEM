@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanban - Pipeline de Reclutamiento</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet"/>
+    <style>
+        .kanban-column {
+            background: #f8fafc;
+            border-radius: 16px;
+            min-width: 320px;
+            width: 320px;
+            display: inline-block;
+            vertical-align: top;
+            margin-right: 16px;
+        }
+        .kanban-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s;
+        }
+        .kanban-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+        .scroll-x {
+            overflow-x: auto;
+            white-space: nowrap;
+            padding-bottom: 16px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+<header class="bg-white border-b sticky top-0 z-20 shadow-sm">
+    <div class="container mx-auto px-6 py-4">
+        <div class="flex justify-between items-center flex-wrap gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+                    <i class="ri-kanban-view text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold">Pipeline de Reclutamiento</h1>
+                    <p class="text-sm text-gray-500">Visualiza y gestiona candidatos por etapa</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <select id="puestoSelector" class="px-4 py-2 border rounded-xl bg-white w-64">
+                    <option>Cargando puestos...</option>
+                </select>
+                <button onclick="abrirConfiguracion()" class="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition flex items-center gap-2">
+                    <i class="ri-settings-line"></i> Configurar
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="container mx-auto px-6 py-6">
+    <div id="kanban-container" class="scroll-x">
+        <div class="text-center py-20 text-gray-500">Selecciona un puesto para ver los candidatos</div>
+    </div>
+</main>
+
+<!-- Modal Configuración simple -->
+<div id="modalConfig" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4" onclick="cerrarModal()">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6" onclick="event.stopPropagation()">
+        <h2 class="text-xl font-bold mb-4">⚙️ Configuración de Etapas</h2>
+        <p class="text-gray-600 mb-4">Las etapas se gestionan directamente en la base de datos.</p>
+        <p class="text-sm text-gray-500 mb-4">Etapas actuales:</p>
+        <div id="listaEtapas" class="mb-4"></div>
+        <button onclick="cerrarModal()" class="w-full px-4 py-2 bg-gray-200 rounded-lg">Cerrar</button>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:5001/api';
+    let etapas = [];
+    let candidatos = [];
+
+    async function cargarPuestos() {
+        try {
+            const res = await axios.get(`${API_URL}/puestos`);
+            const select = document.getElementById('puestoSelector');
+            select.innerHTML = '<option value="">Seleccionar puesto...</option>';
+            res.data.puestos.forEach(p => {
+                select.innerHTML += `<option value="${p.id}">${p.cliente} - ${p.titulo}</option>`;
+            });
+            select.onchange = () => {
+                if (select.value) {
+                    cargarKanban(select.value);
+                }
+            };
+            if (res.data.puestos.length > 0) {
+                select.value = res.data.puestos[0].id;
+                cargarKanban(res.data.puestos[0].id);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    async function cargarKanban(puestoId) {
+        try {
+            const res = await axios.get(`${API_URL}/kanban/candidatos/${puestoId}`);
+            etapas = res.data.etapas || [];
+            candidatos = res.data.candidatos || [];
+            renderKanban();
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('kanban-container').innerHTML = '<div class="text-center py-20 text-red-500">Error cargando datos</div>';
+        }
+    }
+
+    function renderKanban() {
+        const container = document.getElementById('kanban-container');
+        if (!etapas.length) {
+            container.innerHTML = '<div class="text-center py-20 text-gray-500">No hay etapas configuradas</div>';
+            return;
+        }
+        
+        let html = '';
+        for (const etapa of etapas) {
+            const cards = candidatos.filter(c => c.etapa_id === etapa.id);
+            html += `
+                <div class="kanban-column">
+                    <div class="p-3 border-b bg-gray-50 rounded-t-16">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-full" style="background: ${etapa.color}"></span>
+                                <h3 class="font-semibold">${etapa.nombre}</h3>
+                                <span class="text-xs bg-gray-200 px-2 py-0.5 rounded-full">${cards.length}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-3" style="min-height: 500px;">
+                        ${cards.map(c => renderCard(c)).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        container.innerHTML = html;
+    }
+
+    function renderCard(candidato) {
+        const score = candidato.score || 0;
+        const scoreColor = score >= 70 ? 'bg-green-100 text-green-700' : (score >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700');
+        const habilidades = candidato.habilidades || [];
+        return `
+            <div class="kanban-card" onclick="verDetalle(${candidato.id})">
+                <div class="flex justify-between items-start mb-2">
+                    <h4 class="font-semibold text-gray-800">${candidato.nombre || 'Candidato'}</h4>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded-full ${scoreColor}">${score}%</span>
+                </div>
+                <p class="text-xs text-gray-500 mb-2">${candidato.profesion || 'Sin profesión'}</p>
+                <div class="flex flex-wrap gap-1">
+                    ${habilidades.slice(0, 3).map(h => `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">${h}</span>`).join('')}
+                    ${habilidades.length > 3 ? `<span class="text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">+${habilidades.length - 3}</span>` : ''}
+                </div>
+                <div class="mt-2 text-xs text-gray-400">
+                    📅 ${new Date(candidato.fecha_ingreso).toLocaleDateString()}
+                </div>
+            </div>
+        `;
+    }
+
+    async function verDetalle(candidatoId) {
+        const c = candidatos.find(c => c.id === candidatoId);
+        if (c) {
+            alert(`📋 ${c.nombre}\n📧 ${c.email}\n📞 ${c.telefono}\n🎯 Score: ${c.score}%\n💼 ${c.profesion}\n🛠️ Habilidades: ${(c.habilidades || []).join(', ')}`);
+        }
+    }
+
+    async function abrirConfiguracion() {
+        try {
+            const res = await axios.get(`${API_URL}/kanban/etapas`);
+            const lista = document.getElementById('listaEtapas');
+            lista.innerHTML = res.data.etapas.map(e => 
+                `<div class="flex items-center gap-2 p-2 border-b"><span class="w-3 h-3 rounded-full" style="background: ${e.color}"></span> ${e.nombre}</div>`
+            ).join('');
+            document.getElementById('modalConfig').classList.remove('hidden');
+            document.getElementById('modalConfig').classList.add('flex');
+        } catch (error) {
+            alert('Error cargando etapas');
+        }
+    }
+
+    function cerrarModal() {
+        document.getElementById('modalConfig').classList.add('hidden');
+        document.getElementById('modalConfig').classList.remove('flex');
+    }
+
+    cargarPuestos();
+</script>
+</body>
+</html>

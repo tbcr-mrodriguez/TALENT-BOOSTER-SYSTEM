@@ -1,0 +1,287 @@
+/* ========================================
+   ENTREVISTAS DASHBOARD STYLES
+   ======================================== */
+   .entrevistas-dashboard {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  
+  .dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+  
+  .dashboard-header h1 {
+    font-size: 2rem;
+    color: #0f172a;
+  }
+  
+  .header-stats {
+    display: flex;
+    gap: 1rem;
+  }
+  
+  .stat-card {
+    background: white;
+    padding: 1rem 1.5rem;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    text-align: center;
+    min-width: 100px;
+  }
+  
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #2563eb;
+    display: block;
+  }
+  
+  .stat-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+  }
+  
+  .filtros-section {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    border: 1px solid #e2e8f0;
+  }
+  
+  .filtros-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+  
+  .filtro-select, .filtro-input {
+    padding: 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+  
+  .filtro-select:focus, .filtro-input:focus {
+    outline: none;
+    border-color: #2563eb;
+  }
+  
+  .entrevistas-table-container {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    overflow: auto;
+  }
+  
+  .entrevistas-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  
+  .entrevistas-table th {
+    background: #f8fafc;
+    padding: 1rem;
+    text-align: left;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  
+  .entrevistas-table td {
+    padding: 1rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  
+  .entrevista-row:hover {
+    background: #f8fafc;
+  }
+  
+  .status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  
+  .badge-pendiente {
+    background: #fef9c3;
+    color: #854d0e;
+  }
+  
+  .badge-progreso {
+    background: #dbeafe;
+    color: #1e40af;
+  }
+  
+  .badge-completada {
+    background: #dcfce7;
+    color: #166534;
+  }
+  
+  .badge-analizada {
+    background: #f3e8ff;
+    color: #6b21a8;
+  }
+  
+  .score-badge {
+    background: #2563eb;
+    color: white;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  
+  .btn-ver-reporte {
+    background: #2563eb;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .btn-ver-reporte:hover:not(:disabled) {
+    background: #1d4ed8;
+  }
+  
+  .btn-ver-reporte:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 2rem;
+  }
+  
+  .reporte-modal {
+    background: white;
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    border-radius: 16px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  }
+  
+  .reporte-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    background: white;
+    border-radius: 16px 16px 0 0;
+  }
+  
+  .btn-cerrar {
+    background: #f1f5f9;
+    border: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+  }
+  
+  .btn-cerrar:hover {
+    background: #e2e8f0;
+  }
+  
+  .reporte-content {
+    padding: 1.5rem;
+  }
+  
+  .info-basica {
+    background: #f8fafc;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+  }
+  
+  .analisis-section,
+  .fortalezas-section,
+  .mejoras-section,
+  .recomendacion-section {
+    margin-bottom: 1.5rem;
+  }
+  
+  .fortalezas-section h4 {
+    color: #059669;
+  }
+  
+  .mejoras-section h4 {
+    color: #dc2626;
+  }
+  
+  .recomendacion-section h4 {
+    color: #7c3aed;
+  }
+  
+  .recomendacion-text {
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border-left: 4px solid;
+  }
+  
+  .recomendacion-text.contratar {
+    border-left-color: #059669;
+    background: #f0fdf4;
+  }
+  
+  .recomendacion-text.considerar {
+    border-left-color: #d97706;
+    background: #fffbeb;
+  }
+  
+  .recomendacion-text.no_contratar {
+    border-left-color: #dc2626;
+    background: #fef2f2;
+  }
+  
+  .respuestas-section {
+    margin-top: 2rem;
+  }
+  
+  .respuesta-item {
+    background: #f8fafc;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    border-left: 3px solid #2563eb;
+  }
+  
+  .text-center {
+    text-align: center;
+    padding: 2rem;
+    color: #64748b;
+  }

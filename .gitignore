@@ -1,0 +1,10 @@
+venv/
+venv_embeddings/
+node_modules/
+__pycache__/
+*.dylib
+*.so
+*.dll
+.env
+.env.*
+*.env

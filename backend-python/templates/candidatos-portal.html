@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal de Empleo | Talent Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet"/>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        * { font-family: 'Inter', sans-serif; }
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .modal { transition: all 0.3s ease; }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .card-hover { transition: all 0.25s ease; }
+        .card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -12px rgba(0, 0, 0, 0.15); }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+<!-- Header -->
+<header class="bg-gradient-to-r from-blue-700 to-indigo-700 text-white shadow-xl sticky top-0 z-30">
+    <div class="container mx-auto px-6 py-5">
+        <div class="flex justify-between items-center flex-wrap gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center text-xl">🎯</div>
+                <div>
+                    <h1 class="text-2xl font-bold">Portal de Empleo</h1>
+                    <p class="text-blue-200 text-sm">Encuentra tu próxima oportunidad profesional</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="verMisPostulaciones()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 font-medium">
+                    <i class="ri-file-list-line"></i> Mis postulaciones
+                </button>
+                <button onclick="mostrarFormularioTalento()" class="bg-white/10 hover:bg-white/20 px-5 py-2.5 rounded-xl transition-all flex items-center gap-2 font-medium">
+                    <i class="ri-upload-line"></i> Subir CV
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="container mx-auto px-6 py-8">
+    <!-- Tabs -->
+    <div class="flex gap-3 mb-8 border-b border-gray-200 pb-2">
+        <button onclick="cambiarTab('puestos')" id="tab-puestos" class="px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 bg-blue-600 text-white shadow-md">
+            <i class="ri-briefcase-line"></i> Puestos disponibles
+        </button>
+        <button onclick="cambiarTab('postulaciones')" id="tab-postulaciones" class="px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 text-gray-600 hover:bg-gray-100">
+            <i class="ri-history-line"></i> Mis postulaciones
+        </button>
+    </div>
+
+    <!-- Panel de filtros y búsqueda -->
+    <div id="filtros-panel" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 mb-6 fade-in">
+        <div class="flex flex-wrap gap-4 items-end">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">🔍 Buscar</label>
+                <input type="text" id="search-input" placeholder="Título, cliente o habilidad..." class="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            </div>
+            <div class="w-40">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">🏢 Cliente</label>
+                <select id="cliente-filter" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-white">
+                    <option value="">Todos</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">⭐ Seniority</label>
+                <select id="seniority-filter" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-white">
+                    <option value="">Todos</option>
+                    <option value="Trainee">Trainee</option>
+                    <option value="Junior">Junior</option>
+                    <option value="Semi-Senior">Semi-Senior</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Lead">Lead</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">📍 Ubicación</label>
+                <select id="ubicacion-filter" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-white">
+                    <option value="">Todas</option>
+                    <option value="Remoto">Remoto</option>
+                    <option value="Híbrido">Híbrido</option>
+                    <option value="Presencial">Presencial</option>
+                </select>
+            </div>
+            <div class="w-40">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">💰 Salario (mínimo)</label>
+                <select id="salario-filter" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-white">
+                    <option value="0">Todos</option>
+                    <option value="1500">$1,500+</option>
+                    <option value="2000">$2,000+</option>
+                    <option value="2500">$2,500+</option>
+                    <option value="3000">$3,000+</option>
+                    <option value="4000">$4,000+</option>
+                </select>
+            </div>
+            <div class="w-40">
+                <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">📅 Ordenar por</label>
+                <select id="ordenar-filter" class="w-full px-4 py-2.5 border border-gray-200 rounded-xl bg-white">
+                    <option value="fecha_desc">Más reciente</option>
+                    <option value="fecha_asc">Más antiguo</option>
+                    <option value="salario_desc">Mayor salario</option>
+                    <option value="salario_asc">Menor salario</option>
+                    <option value="titulo_asc">Título A-Z</option>
+                </select>
+            </div>
+            <button id="reset-filtros" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-5 py-2.5 rounded-xl transition-all flex items-center gap-2">
+                <i class="ri-refresh-line"></i> Limpiar
+            </button>
+        </div>
+        <div id="filtros-activos" class="flex flex-wrap gap-2 mt-4"></div>
+    </div>
+
+    <!-- Contador de resultados -->
+    <div id="resultados-info" class="mb-4 text-sm text-gray-500 flex justify-between items-center">
+        <span id="contador-puestos">Cargando puestos...</span>
+        <div class="flex gap-2">
+            <button id="vista-tarjetas" class="px-3 py-1 rounded-lg bg-blue-100 text-blue-700 text-sm">📋 Tarjetas</button>
+            <button id="vista-lista" class="px-3 py-1 rounded-lg text-gray-500 hover:bg-gray-100 text-sm">📄 Lista</button>
+        </div>
+    </div>
+
+    <!-- Lista de puestos (vista tarjetas) -->
+    <div id="puestos-container" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6 fade-in"></div>
+
+    <!-- Lista de puestos (vista lista - oculta) -->
+    <div id="puestos-lista-container" class="hidden fade-in space-y-3"></div>
+
+    <!-- Mis postulaciones -->
+    <div id="postulaciones-container" class="hidden fade-in">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <h2 class="text-xl font-bold mb-5 flex items-center gap-2"><i class="ri-history-line text-blue-600"></i> Mis postulaciones</h2>
+            <div id="postulaciones-list" class="space-y-4">
+                <div class="text-center py-12 text-gray-500">
+                    <i class="ri-inbox-line text-5xl mb-3 block"></i>
+                    <p>Ingresa tu email para ver tus postulaciones</p>
+                    <div class="flex gap-3 max-w-md mx-auto mt-4">
+                        <input type="email" id="email-buscar" placeholder="tu@email.com" class="flex-1 px-4 py-2.5 border rounded-xl">
+                        <button onclick="cargarMisPostulaciones()" class="bg-blue-600 text-white px-6 py-2.5 rounded-xl hover:bg-blue-700 transition">Buscar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- Modal de postulación -->
+<div id="modal-postular" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4" onclick="cerrarModal()">
+    <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+        <div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+            <h2 class="text-xl font-bold" id="modal-titulo">Postular al puesto</h2>
+            <button onclick="cerrarModal()" class="text-gray-400 hover:text-gray-600 text-2xl w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100">&times;</button>
+        </div>
+        <div class="p-6">
+            <form id="form-postulacion" enctype="multipart/form-data">
+                <input type="hidden" id="puesto-id" name="puesto_id">
+                
+                <div class="grid md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Nombre completo *</label>
+                        <input type="text" name="nombre" required class="w-full px-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Correo electrónico *</label>
+                        <input type="email" name="email" required class="w-full px-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Teléfono *</label>
+                    <input type="tel" name="telefono" required class="w-full px-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-blue-500">
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Adjuntar CV (PDF o DOCX) *</label>
+                    <input type="file" name="cv" accept=".pdf,.docx" required class="w-full">
+                    <p class="text-xs text-gray-500 mt-1">Aceptamos archivos PDF y Word</p>
+                </div>
+                
+                <div id="preguntas-adicionales" class="space-y-4 mb-6 border-t pt-4"></div>
+                
+                <div class="flex gap-3">
+                    <button type="submit" class="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition font-medium">Enviar postulación</button>
+                    <button type="button" onclick="cerrarModal()" class="px-6 py-3 border rounded-xl hover:bg-gray-50 transition">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de talento general -->
+<div id="modal-talento" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4" onclick="cerrarModalTalento()">
+    <div class="bg-white rounded-2xl max-w-md w-full" onclick="event.stopPropagation()">
+        <div class="border-b px-6 py-4 flex justify-between items-center">
+            <h2 class="text-xl font-bold"><i class="ri-star-line text-yellow-500"></i> Agregar a la base de talento</h2>
+            <button onclick="cerrarModalTalento()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        </div>
+        <div class="p-6">
+            <form id="form-talento" enctype="multipart/form-data">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Nombre completo *</label>
+                    <input type="text" name="nombre" required class="w-full px-3 py-2.5 border rounded-xl">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Correo electrónico *</label>
+                    <input type="email" name="email" required class="w-full px-3 py-2.5 border rounded-xl">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Teléfono *</label>
+                    <input type="tel" name="telefono" required class="w-full px-3 py-2.5 border rounded-xl">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Adjuntar CV (opcional)</label>
+                    <input type="file" name="cv" accept=".pdf,.docx" class="w-full">
+                </div>
+                <button type="submit" class="w-full bg-green-600 text-white py-3 rounded-xl hover:bg-green-700 transition font-medium">Guardar en talento</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de resultados -->
+<div id="modal-resultado" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 text-center">
+        <div id="resultado-icono" class="text-5xl mb-4">✅</div>
+        <h3 id="resultado-titulo" class="text-xl font-bold mb-2">¡Postulación exitosa!</h3>
+        <p id="resultado-mensaje" class="text-gray-600 mb-6">Hemos recibido tu postulación correctamente.</p>
+        <button onclick="cerrarModalResultado()" class="bg-blue-600 text-white px-6 py-2.5 rounded-xl">Cerrar</button>
+    </div>
+</div>
+
+<!-- Modal de Detalles del Puesto -->
+<div id="modal-detalles" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4" onclick="cerrarModalDetalles()">
+    <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+        <div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+            <h2 class="text-xl font-bold flex items-center gap-2">
+                <i class="ri-briefcase-line text-blue-600"></i> 
+                <span id="detalles-titulo">Detalles del puesto</span>
+            </h2>
+            <button onclick="cerrarModalDetalles()" class="text-gray-400 hover:text-gray-600 text-2xl w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-100">&times;</button>
+        </div>
+        <div class="p-6" id="detalles-content">
+            <div class="text-center py-12">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+                <p class="mt-4 text-gray-500">Cargando detalles...</p>
+            </div>
+        </div>
+        <div class="sticky bottom-0 bg-white border-t px-6 py-4 flex justify-end gap-3">
+            <button onclick="cerrarModalDetalles()" class="px-6 py-2.5 border rounded-xl hover:bg-gray-50 transition">Cerrar</button>
+            <button id="btn-aplicar-desde-detalles" class="bg-blue-600 text-white px-6 py-2.5 rounded-xl hover:bg-blue-700 transition font-medium flex items-center gap-2">
+                <i class="ri-send-plane-line"></i> Postular ahora
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_URL = 'http://localhost:5001/api';
+    let puestosGlobal = [];
+    let vistaActual = 'tarjetas';
+    let puestoActual = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        cargarPuestos();
+        cargarClientesUnicos();
+        setupEventListeners();
+    });
+
+    function setupEventListeners() {
+        document.getElementById('search-input').addEventListener('input', () => filtrarYRenderizar());
+        document.getElementById('cliente-filter').addEventListener('change', () => filtrarYRenderizar());
+        document.getElementById('seniority-filter').addEventListener('change', () => filtrarYRenderizar());
+        document.getElementById('ubicacion-filter').addEventListener('change', () => filtrarYRenderizar());
+        document.getElementById('salario-filter').addEventListener('change', () => filtrarYRenderizar());
+        document.getElementById('ordenar-filter').addEventListener('change', () => filtrarYRenderizar());
+        document.getElementById('reset-filtros').addEventListener('click', resetFiltros);
+        document.getElementById('vista-tarjetas').addEventListener('click', () => cambiarVista('tarjetas'));
+        document.getElementById('vista-lista').addEventListener('click', () => cambiarVista('lista'));
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function cambiarVista(tipo) {
+        vistaActual = tipo;
+        const btnTarjetas = document.getElementById('vista-tarjetas');
+        const btnLista = document.getElementById('vista-lista');
+        const containerTarjetas = document.getElementById('puestos-container');
+        const containerLista = document.getElementById('puestos-lista-container');
+        
+        if (tipo === 'tarjetas') {
+            btnTarjetas.className = 'px-3 py-1 rounded-lg bg-blue-100 text-blue-700 text-sm';
+            btnLista.className = 'px-3 py-1 rounded-lg text-gray-500 hover:bg-gray-100 text-sm';
+            containerTarjetas.classList.remove('hidden');
+            containerLista.classList.add('hidden');
+        } else {
+            btnTarjetas.className = 'px-3 py-1 rounded-lg text-gray-500 hover:bg-gray-100 text-sm';
+            btnLista.className = 'px-3 py-1 rounded-lg bg-blue-100 text-blue-700 text-sm';
+            containerTarjetas.classList.add('hidden');
+            containerLista.classList.remove('hidden');
+        }
+        filtrarYRenderizar();
+    }
+
+    async function cargarPuestos() {
+        try {
+            const res = await axios.get(`${API_URL}/puestos`);
+            if (res.data.success) {
+                puestosGlobal = res.data.puestos;
+                filtrarYRenderizar();
+            }
+        } catch (error) {
+            document.getElementById('puestos-container').innerHTML = `<div class="col-span-full text-center py-12 text-red-500"><i class="ri-error-warning-line text-4xl mb-2 block"></i>Error cargando puestos</div>`;
+        }
+    }
+
+    async function cargarClientesUnicos() {
+        try {
+            const res = await axios.get(`${API_URL}/puestos`);
+            if (res.data.success) {
+                const clientes = [...new Set(res.data.puestos.map(p => p.cliente))];
+                const select = document.getElementById('cliente-filter');
+                clientes.forEach(cliente => {
+                    const option = document.createElement('option');
+                    option.value = cliente;
+                    option.textContent = cliente;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error cargando clientes:', error);
+        }
+    }
+
+    function extraerSalarioMinimo(salarioStr) {
+        if (!salarioStr) return 0;
+        const match = salarioStr.match(/\$?(\d+(?:,\d+)?)/);
+        if (match) {
+            return parseInt(match[1].replace(/,/g, ''));
+        }
+        return 0;
+    }
+
+    function filtrarYRenderizar() {
+        const searchTerm = document.getElementById('search-input').value.toLowerCase();
+        const clienteFiltro = document.getElementById('cliente-filter').value;
+        const seniorityFiltro = document.getElementById('seniority-filter').value;
+        const ubicacionFiltro = document.getElementById('ubicacion-filter').value;
+        const salarioMin = parseInt(document.getElementById('salario-filter').value) || 0;
+        const ordenarPor = document.getElementById('ordenar-filter').value;
+        
+        let filtrados = puestosGlobal.filter(puesto => {
+            if (clienteFiltro && puesto.cliente !== clienteFiltro) return false;
+            if (seniorityFiltro && puesto.seniority !== seniorityFiltro) return false;
+            if (ubicacionFiltro && !puesto.ubicacion?.includes(ubicacionFiltro)) return false;
+            
+            const salarioPuesto = extraerSalarioMinimo(puesto.salario_oferta);
+            if (salarioMin > 0 && salarioPuesto < salarioMin) return false;
+            
+            if (searchTerm) {
+                return puesto.titulo.toLowerCase().includes(searchTerm) ||
+                       puesto.cliente.toLowerCase().includes(searchTerm) ||
+                       (puesto.descripcion && puesto.descripcion.toLowerCase().includes(searchTerm)) ||
+                       (puesto.habilidades_requeridas && puesto.habilidades_requeridas.some(h => h.toLowerCase().includes(searchTerm)));
+            }
+            return true;
+        });
+        
+        filtrados.sort((a, b) => {
+            switch(ordenarPor) {
+                case 'fecha_desc': return new Date(b.fecha_publicacion) - new Date(a.fecha_publicacion);
+                case 'fecha_asc': return new Date(a.fecha_publicacion) - new Date(b.fecha_publicacion);
+                case 'salario_desc': return extraerSalarioMinimo(b.salario_oferta) - extraerSalarioMinimo(a.salario_oferta);
+                case 'salario_asc': return extraerSalarioMinimo(a.salario_oferta) - extraerSalarioMinimo(b.salario_oferta);
+                case 'titulo_asc': return a.titulo.localeCompare(b.titulo);
+                default: return 0;
+            }
+        });
+        
+        document.getElementById('contador-puestos').innerHTML = `<i class="ri-briefcase-line"></i> ${filtrados.length} puestos encontrados`;
+        renderizarPuestos(filtrados);
+        actualizarFiltrosActivos();
+    }
+
+    function actualizarFiltrosActivos() {
+        const container = document.getElementById('filtros-activos');
+        const filtros = [];
+        const cliente = document.getElementById('cliente-filter').value;
+        const seniority = document.getElementById('seniority-filter').value;
+        const ubicacion = document.getElementById('ubicacion-filter').value;
+        const salario = document.getElementById('salario-filter').value;
+        const search = document.getElementById('search-input').value;
+        
+        if (search) filtros.push({ label: `🔍 "${search}"`, tipo: 'search' });
+        if (cliente) filtros.push({ label: `🏢 ${cliente}`, tipo: 'cliente' });
+        if (seniority) filtros.push({ label: `⭐ ${seniority}`, tipo: 'seniority' });
+        if (ubicacion) filtros.push({ label: `📍 ${ubicacion}`, tipo: 'ubicacion' });
+        if (salario !== '0') filtros.push({ label: `💰 $${salario}+`, tipo: 'salario' });
+        
+        if (filtros.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        
+        container.innerHTML = filtros.map(f => `
+            <span class="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm flex items-center gap-1">
+                ${f.label}
+                <button onclick="eliminarFiltro('${f.tipo}')" class="ml-1 hover:text-blue-900">&times;</button>
+            </span>
+        `).join('');
+    }
+
+    function eliminarFiltro(tipo) {
+        if (tipo === 'search') document.getElementById('search-input').value = '';
+        if (tipo === 'cliente') document.getElementById('cliente-filter').value = '';
+        if (tipo === 'seniority') document.getElementById('seniority-filter').value = '';
+        if (tipo === 'ubicacion') document.getElementById('ubicacion-filter').value = '';
+        if (tipo === 'salario') document.getElementById('salario-filter').value = '0';
+        filtrarYRenderizar();
+    }
+
+    function resetFiltros() {
+        document.getElementById('search-input').value = '';
+        document.getElementById('cliente-filter').value = '';
+        document.getElementById('seniority-filter').value = '';
+        document.getElementById('ubicacion-filter').value = '';
+        document.getElementById('salario-filter').value = '0';
+        document.getElementById('ordenar-filter').value = 'fecha_desc';
+        filtrarYRenderizar();
+    }
+
+    function renderizarPuestos(puestos) {
+        const containerTarjetas = document.getElementById('puestos-container');
+        const containerLista = document.getElementById('puestos-lista-container');
+        
+        if (!puestos || puestos.length === 0) {
+            const mensajeVacio = '<div class="col-span-full text-center py-12 text-gray-500">📭 No hay puestos disponibles en este momento.</div>';
+            if (containerTarjetas) containerTarjetas.innerHTML = mensajeVacio;
+            if (containerLista) containerLista.innerHTML = mensajeVacio;
+            return;
+        }
+        
+        if (vistaActual === 'tarjetas') {
+            containerTarjetas.innerHTML = puestos.map(puesto => `
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 card-hover fade-in">
+                    <div class="flex justify-between items-start mb-3">
+                        <div>
+                            <span class="text-xs font-semibold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full">${escapeHtml(puesto.cliente)}</span>
+                            <h3 class="text-xl font-bold mt-2 text-gray-800">${escapeHtml(puesto.titulo)}</h3>
+                        </div>
+                        <span class="text-sm bg-gray-100 px-3 py-1 rounded-full">${escapeHtml(puesto.seniority || 'N/A')}</span>
+                    </div>
+                    <p class="text-gray-600 text-sm mb-4 line-clamp-2">${escapeHtml(puesto.descripcion ? puesto.descripcion.substring(0, 120) : 'Sin descripción')}${puesto.descripcion && puesto.descripcion.length > 120 ? '...' : ''}</p>
+                    
+                    ${puesto.responsabilidades && puesto.responsabilidades.length > 0 ? `
+                    <div class="mb-3">
+                        <p class="text-xs text-gray-500 font-semibold">📋 Responsabilidades:</p>
+                        <ul class="text-xs text-gray-600 list-disc pl-4">
+                            ${puesto.responsabilidades.slice(0, 2).map(r => `<li>${escapeHtml(r.substring(0, 60))}${r.length > 60 ? '...' : ''}</li>`).join('')}
+                            ${puesto.responsabilidades.length > 2 ? `<li class="text-gray-400">+${puesto.responsabilidades.length - 2} más</li>` : ''}
+                        </ul>
+                    </div>
+                    ` : ''}
+                    
+                    <div class="flex flex-wrap gap-2 mb-4">
+                        ${(puesto.habilidades_requeridas || []).slice(0, 4).map(h => `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">${escapeHtml(h)}</span>`).join('')}
+                        ${(puesto.habilidades_requeridas || []).length > 4 ? `<span class="text-xs bg-gray-100 text-gray-400 px-2 py-1 rounded-full">+${puesto.habilidades_requeridas.length - 4}</span>` : ''}
+                    </div>
+                    <div class="flex justify-between items-center text-sm text-gray-500 mb-4">
+                        <span><i class="ri-map-pin-line"></i> ${escapeHtml(puesto.ubicacion || 'No especificada')}</span>
+                        ${puesto.salario_oferta ? `<span class="font-semibold text-green-600"><i class="ri-money-dollar-circle-line"></i> ${escapeHtml(puesto.salario_oferta)}</span>` : ''}
+                    </div>
+                    <button onclick="verDetallesPuesto(${puesto.id})" class="w-full bg-gray-100 text-gray-700 py-2.5 rounded-xl hover:bg-gray-200 transition font-medium flex items-center justify-center gap-2 mb-2">
+                        <i class="ri-eye-line"></i> Ver detalles
+                    </button>
+                    <button onclick="abrirModalPostular(${puesto.id})" class="w-full bg-blue-600 text-white py-2.5 rounded-xl hover:bg-blue-700 transition font-medium flex items-center justify-center gap-2">
+                        <i class="ri-send-plane-line"></i> Postular ahora
+                    </button>
+                </div>
+            `).join('');
+            
+            if (containerLista) containerLista.classList.add('hidden');
+            containerTarjetas.classList.remove('hidden');
+        } else {
+            containerLista.innerHTML = puestos.map(puesto => `
+                <div class="bg-white rounded-xl border border-gray-100 p-4 card-hover flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex-1 min-w-[200px]">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded">${escapeHtml(puesto.cliente)}</span>
+                            <span class="text-xs bg-gray-100 px-2 py-0.5 rounded">${escapeHtml(puesto.seniority || 'N/A')}</span>
+                        </div>
+                        <h3 class="font-bold text-gray-800">${escapeHtml(puesto.titulo)}</h3>
+                        <div class="flex flex-wrap gap-1 mt-1">
+                            ${(puesto.habilidades_requeridas || []).slice(0, 3).map(h => `<span class="text-xs text-gray-500">• ${escapeHtml(h)}</span>`).join('')}
+                        </div>
+                        <div class="text-sm text-gray-500 mt-1">
+                            <i class="ri-map-pin-line"></i> ${escapeHtml(puesto.ubicacion || 'N/A')}
+                            ${puesto.salario_oferta ? ` | <span class="text-green-600">${escapeHtml(puesto.salario_oferta)}</span>` : ''}
+                            ${puesto.vacantes ? ` | <span class="text-purple-600">${puesto.vacantes} vacante${puesto.vacantes > 1 ? 's' : ''}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="verDetallesPuesto(${puesto.id})" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-200 transition text-sm">Ver detalles</button>
+                        <button onclick="abrirModalPostular(${puesto.id})" class="bg-blue-600 text-white px-5 py-2 rounded-xl hover:bg-blue-700 transition text-sm">Postular</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            if (containerTarjetas) containerTarjetas.classList.add('hidden');
+            containerLista.classList.remove('hidden');
+        }
+    }
+
+    function renderizarDetalles(puesto) {
+        const container = document.getElementById('detalles-content');
+        
+        container.innerHTML = `
+            <div class="mb-6 pb-4 border-b">
+                <div class="flex items-center gap-2 mb-2 flex-wrap">
+                    <span class="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold">${escapeHtml(puesto.cliente)}</span>
+                    <span class="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm">${escapeHtml(puesto.seniority || 'No especificado')}</span>
+                    <span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm">✅ Activo</span>
+                    ${puesto.vacantes ? `<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm">👥 ${puesto.vacantes} vacante${puesto.vacantes > 1 ? 's' : ''}</span>` : ''}
+                </div>
+                <h1 class="text-2xl font-bold text-gray-800 mt-2">${escapeHtml(puesto.titulo)}</h1>
+                <div class="flex flex-wrap gap-4 mt-2 text-gray-500">
+                    <span><i class="ri-map-pin-line"></i> ${escapeHtml(puesto.ubicacion || 'No especificada')}</span>
+                    ${puesto.salario_oferta ? `<span class="text-green-600 font-semibold"><i class="ri-money-dollar-circle-line"></i> ${escapeHtml(puesto.salario_oferta)}</span>` : ''}
+                    <span><i class="ri-calendar-line"></i> Publicado: ${new Date(puesto.fecha_publicacion).toLocaleDateString()}</span>
+                    ${puesto.fecha_limite ? `<span><i class="ri-calendar-close-line"></i> Vence: ${new Date(puesto.fecha_limite).toLocaleDateString()}</span>` : ''}
+                </div>
+            </div>
+            
+            ${puesto.sobre_empresa ? `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-building-line text-blue-600"></i> Sobre la empresa</h3>
+                <div class="bg-blue-50 rounded-xl p-4 text-gray-700 leading-relaxed">
+                    ${escapeHtml(puesto.sobre_empresa)}
+                </div>
+            </div>
+            ` : ''}
+            
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-file-text-line text-blue-600"></i> Descripción del puesto</h3>
+                <div class="bg-gray-50 rounded-xl p-4 text-gray-700 leading-relaxed">
+                    ${escapeHtml(puesto.descripcion || 'No hay descripción disponible.')}
+                </div>
+            </div>
+            
+            ${puesto.responsabilidades && puesto.responsabilidades.length > 0 ? `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-task-line text-orange-600"></i> Responsabilidades</h3>
+                <ul class="list-disc pl-6 space-y-2 text-gray-700">
+                    ${puesto.responsabilidades.map(r => `<li>${escapeHtml(r)}</li>`).join('')}
+                </ul>
+            </div>
+            ` : ''}
+            
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-checkbox-circle-line text-green-600"></i> Requisitos</h3>
+                <div class="bg-gray-50 rounded-xl p-4 whitespace-pre-line text-gray-700">
+                    ${escapeHtml(puesto.requisitos || 'No se especificaron requisitos.')}
+                </div>
+            </div>
+            
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-code-box-line text-purple-600"></i> Habilidades requeridas</h3>
+                <div class="flex flex-wrap gap-2">
+                    ${(puesto.habilidades_requeridas || []).map(h => `<span class="bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full text-sm font-medium">${escapeHtml(h)}</span>`).join('') || '<span class="text-gray-500">No se especificaron habilidades</span>'}
+                </div>
+            </div>
+            
+            ${puesto.beneficios && puesto.beneficios.length > 0 ? `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-gift-line text-yellow-600"></i> Beneficios</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    ${puesto.beneficios.map(b => `<div class="flex items-center gap-2 bg-green-50 rounded-lg p-2 text-sm"><span class="text-green-600">✅</span> ${escapeHtml(b)}</div>`).join('')}
+                </div>
+            </div>
+            ` : ''}
+            
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2"><i class="ri-information-line text-gray-600"></i> Información adicional</h3>
+                <div class="grid md:grid-cols-2 gap-4">
+                    ${puesto.horario ? `<div class="bg-gray-50 rounded-xl p-3"><span class="text-xs text-gray-500">⏰ Horario</span><p class="font-medium">${escapeHtml(puesto.horario)}</p></div>` : ''}
+                    ${puesto.tipo_contrato ? `<div class="bg-gray-50 rounded-xl p-3"><span class="text-xs text-gray-500">📄 Tipo de contrato</span><p class="font-medium">${escapeHtml(puesto.tipo_contrato)}</p></div>` : ''}
+                    ${puesto.modalidad ? `<div class="bg-gray-50 rounded-xl p-3"><span class="text-xs text-gray-500">🏠 Modalidad</span><p class="font-medium">${escapeHtml(puesto.modalidad)}</p></div>` : ''}
+                    <div class="bg-gray-50 rounded-xl p-3"><span class="text-xs text-gray-500">⭐ Seniority</span><p class="font-medium">${escapeHtml(puesto.seniority || 'No especificado')}</p></div>
+                </div>
+            </div>
+        `;
+        
+        const btnAplicar = document.getElementById('btn-aplicar-desde-detalles');
+        btnAplicar.onclick = () => {
+            cerrarModalDetalles();
+            abrirModalPostular(puesto.id);
+        };
+    }
+
+    async function verDetallesPuesto(puestoId) {
+        try {
+            const res = await axios.get(`${API_URL}/puesto/${puestoId}`);
+            if (res.data.success) {
+                puestoActual = res.data.puesto;
+                renderizarDetalles(puestoActual);
+                document.getElementById('modal-detalles').classList.remove('hidden');
+                document.getElementById('modal-detalles').classList.add('flex');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error al cargar los detalles del puesto');
+        }
+    }
+
+    async function abrirModalPostular(puestoId) {
+        try {
+            const res = await axios.get(`${API_URL}/puesto/${puestoId}`);
+            if (res.data.success) {
+                const puesto = res.data.puesto;
+                document.getElementById('modal-titulo').innerHTML = `📝 Postular a: ${puesto.titulo}`;
+                document.getElementById('puesto-id').value = puestoId;
+                
+                const preguntasContainer = document.getElementById('preguntas-adicionales');
+                if (puesto.preguntas && puesto.preguntas.length > 0) {
+                    preguntasContainer.innerHTML = `
+                        <h4 class="font-semibold mb-3 flex items-center gap-2"><i class="ri-questionnaire-line"></i> Información adicional</h4>
+                        ${puesto.preguntas.map(p => `
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-1">${escapeHtml(p.pregunta)} ${p.requerido ? '*' : ''}</label>
+                                ${p.tipo === 'select' ? 
+                                    `<select name="respuesta_${p.id}" ${p.requerido ? 'required' : ''} class="w-full px-3 py-2 border rounded-xl">
+                                        <option value="">Seleccione...</option>
+                                        ${(p.opciones || []).map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('')}
+                                    </select>` :
+                                    `<input type="${p.tipo === 'number' ? 'number' : 'text'}" name="respuesta_${p.id}" ${p.requerido ? 'required' : ''} class="w-full px-3 py-2 border rounded-xl">`
+                                }
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    preguntasContainer.innerHTML = '';
+                }
+                
+                document.getElementById('modal-postular').classList.remove('hidden');
+                document.getElementById('modal-postular').classList.add('flex');
+            }
+        } catch (error) {
+            alert('Error al cargar el puesto');
+        }
+    }
+
+    document.getElementById('form-postulacion').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        try {
+            const res = await axios.post(`${API_URL}/postular`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            if (res.data.success) {
+                cerrarModal();
+                mostrarResultado('✅', '¡Postulación exitosa!', 'Hemos recibido tu postulación. El equipo la revisará y te contactará pronto.');
+                e.target.reset();
+            } else {
+                mostrarResultado('❌', 'Error', res.data.error || 'Hubo un problema');
+            }
+        } catch (error) {
+            mostrarResultado('❌', 'Error', 'Error de conexión con el servidor');
+        }
+    });
+
+    function mostrarFormularioTalento() {
+        document.getElementById('modal-talento').classList.remove('hidden');
+        document.getElementById('modal-talento').classList.add('flex');
+    }
+
+    document.getElementById('form-talento').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        try {
+            const res = await axios.post(`${API_URL}/talento-general`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            if (res.data.success) {
+                cerrarModalTalento();
+                mostrarResultado('🌟', '¡Registro exitoso!', 'Tu CV ha sido agregado a nuestra base de talento.');
+                e.target.reset();
+            } else {
+                mostrarResultado('❌', 'Error', res.data.error);
+            }
+        } catch (error) {
+            mostrarResultado('❌', 'Error', 'Error de conexión');
+        }
+    });
+
+    async function cargarMisPostulaciones() {
+        const email = document.getElementById('email-buscar').value;
+        if (!email) { alert('Ingresa tu correo electrónico'); return; }
+        try {
+            const res = await axios.get(`${API_URL}/mis-postulaciones`, { params: { email } });
+            const container = document.getElementById('postulaciones-list');
+            if (res.data.success && res.data.postulaciones && res.data.postulaciones.length > 0) {
+                container.innerHTML = res.data.postulaciones.map(p => `
+                    <div class="border rounded-xl p-5 hover:shadow-md transition">
+                        <div class="flex justify-between items-start flex-wrap gap-3">
+                            <div>
+                                <h3 class="font-bold text-lg">${escapeHtml(p.titulo)}</h3>
+                                <p class="text-sm text-gray-600">${escapeHtml(p.cliente)}</p>
+                                <p class="text-xs text-gray-400 mt-1"><i class="ri-calendar-line"></i> ${new Date(p.fecha_postulacion).toLocaleDateString()}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="inline-block px-3 py-1 rounded-full text-sm font-semibold ${p.estado === 'revisado' ? 'bg-green-100 text-green-700' : p.estado === 'contacto' ? 'bg-blue-100 text-blue-700' : p.estado === 'rechazado' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+                                    ${p.estado === 'revisado' ? '📊 Revisado' : p.estado === 'contacto' ? '📞 En contacto' : p.estado === 'rechazado' ? '❌ No seleccionado' : '⏳ Pendiente'}
+                                </span>
+                                ${p.match_score > 0 ? `<div class="mt-2"><span class="text-2xl font-bold ${p.match_score >= 70 ? 'text-green-600' : p.match_score >= 50 ? 'text-yellow-600' : 'text-red-600'}">${p.match_score}%</span><span class="text-xs text-gray-500"> match</span></div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = `<div class="text-center py-12 text-gray-500"><i class="ri-inbox-line text-4xl mb-2 block"></i>No tienes postulaciones con este correo.<br><button onclick="cambiarTab('puestos')" class="text-blue-600 underline mt-2">Ver puestos disponibles</button></div>`;
+            }
+        } catch (error) {
+            document.getElementById('postulaciones-list').innerHTML = `<div class="text-center py-8 text-red-500">❌ Error al cargar tus postulaciones</div>`;
+        }
+    }
+
+    function cambiarTab(tab) {
+        const puestosTab = document.getElementById('tab-puestos');
+        const postulacionesTab = document.getElementById('tab-postulaciones');
+        const puestosContainer = document.getElementById('puestos-container');
+        const puestosListaContainer = document.getElementById('puestos-lista-container');
+        const postulacionesContainer = document.getElementById('postulaciones-container');
+        const filtrosPanel = document.getElementById('filtros-panel');
+        const resultadosInfo = document.getElementById('resultados-info');
+        
+        if (tab === 'puestos') {
+            puestosTab.className = 'px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 bg-blue-600 text-white shadow-md';
+            postulacionesTab.className = 'px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 text-gray-600 hover:bg-gray-100';
+            puestosContainer.classList.remove('hidden');
+            if (puestosListaContainer) puestosListaContainer.classList.remove('hidden');
+            postulacionesContainer.classList.add('hidden');
+            filtrosPanel.classList.remove('hidden');
+            resultadosInfo.classList.remove('hidden');
+            cargarPuestos();
+        } else {
+            puestosTab.className = 'px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 text-gray-600 hover:bg-gray-100';
+            postulacionesTab.className = 'px-6 py-3 rounded-t-xl font-semibold transition-all flex items-center gap-2 bg-blue-600 text-white shadow-md';
+            puestosContainer.classList.add('hidden');
+            if (puestosListaContainer) puestosListaContainer.classList.add('hidden');
+            postulacionesContainer.classList.remove('hidden');
+            filtrosPanel.classList.add('hidden');
+            resultadosInfo.classList.add('hidden');
+        }
+    }
+
+    function verMisPostulaciones() { cambiarTab('postulaciones'); }
+    
+    function cerrarModal() { 
+        document.getElementById('modal-postular').classList.add('hidden'); 
+        document.getElementById('modal-postular').classList.remove('flex'); 
+    }
+    
+    function cerrarModalTalento() { 
+        document.getElementById('modal-talento').classList.add('hidden'); 
+        document.getElementById('modal-talento').classList.remove('flex'); 
+    }
+    
+    function cerrarModalResultado() { 
+        document.getElementById('modal-resultado').classList.add('hidden'); 
+        document.getElementById('modal-resultado').classList.remove('flex'); 
+    }
+    
+    function cerrarModalDetalles() {
+        document.getElementById('modal-detalles').classList.add('hidden');
+        document.getElementById('modal-detalles').classList.remove('flex');
+        puestoActual = null;
+    }
+    
+    function mostrarResultado(icono, titulo, mensaje) {
+        document.getElementById('resultado-icono').textContent = icono;
+        document.getElementById('resultado-titulo').textContent = titulo;
+        document.getElementById('resultado-mensaje').textContent = mensaje;
+        document.getElementById('modal-resultado').classList.remove('hidden');
+        document.getElementById('modal-resultado').classList.add('flex');
+    }
+</script>
+</body>
+</html>

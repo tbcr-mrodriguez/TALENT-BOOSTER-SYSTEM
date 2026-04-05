@@ -1,0 +1,121 @@
+"""
+Configuración centralizada de la aplicación
+Soporta desarrollo y producción mediante variables de entorno
+"""
+
+import os
+from pathlib import Path
+
+# Base del proyecto
+BASE_DIR = Path(__file__).resolve().parent
+
+# =====================================================
+# ENTORNO
+# =====================================================
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
+
+# =====================================================
+# BASE DE DATOS
+# =====================================================
+def get_database_url():
+    """Retorna la URL de la base de datos según el entorno"""
+    if ENVIRONMENT == 'production':
+        # En producción, Render provee DATABASE_URL
+        database_url = os.environ.get('DATABASE_URL')
+        if database_url and database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        return database_url
+    else:
+        # Desarrollo local
+        return os.environ.get(
+            'DATABASE_URL',
+            'postgresql://talent_user:Talent123!@localhost:5432/talent_pipeline'
+        )
+
+# =====================================================
+# API KEYS (desde variables de entorno)
+# =====================================================
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY')
+
+# =====================================================
+# SEGURIDAD
+# =====================================================
+SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-jwt-secret-change-in-production')
+
+# =====================================================
+# CORS (orígenes permitidos)
+# =====================================================
+CORS_ORIGINS = {
+    'development': [
+        'http://localhost:3000',
+        'http://localhost:5001',
+    ],
+    'production': [
+        os.environ.get('FRONTEND_URL', 'https://tu-frontend.onrender.com'),
+        os.environ.get('BACKEND_URL', 'https://tu-backend.onrender.com'),
+    ]
+}
+
+ALLOWED_ORIGINS = CORS_ORIGINS.get(ENVIRONMENT, CORS_ORIGINS['development'])
+
+# =====================================================
+# LÍMITES (rate limiting)
+# =====================================================
+RATE_LIMITS = {
+    'development': {
+        'default': ["200 per day", "50 per hour"],
+        'analyze': "10 per minute",
+        'search': "30 per minute",
+    },
+    'production': {
+        'default': ["100 per day", "25 per hour"],
+        'analyze': "5 per minute",
+        'search': "15 per minute",
+    }
+}
+
+RATE_LIMITS_CONFIG = RATE_LIMITS.get(ENVIRONMENT, RATE_LIMITS['development'])
+
+# =====================================================
+# ARCHIVOS
+# =====================================================
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB
+ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc'}
+ALLOWED_VIDEO_EXTENSIONS = {'webm', 'mp4', 'mkv'}
+
+# =====================================================
+# LOGGING
+# =====================================================
+LOG_LEVEL = 'DEBUG' if ENVIRONMENT == 'development' else 'INFO'
+
+# =====================================================
+# VERIFICACIÓN DE CONFIGURACIÓN
+# =====================================================
+def validate_config():
+    """Valida que las configuraciones críticas estén presentes"""
+    errors = []
+    
+    if ENVIRONMENT == 'production':
+        if not OPENAI_API_KEY:
+            errors.append("OPENAI_API_KEY no configurada")
+        if not DEEPSEEK_API_KEY:
+            errors.append("DEEPSEEK_API_KEY no configurada")
+        if not SECRET_KEY or SECRET_KEY == 'dev-secret-key-change-in-production':
+            errors.append("SECRET_KEY no configurada correctamente")
+    
+    if errors:
+        print("❌ ERRORES DE CONFIGURACIÓN:")
+        for e in errors:
+            print(f"   - {e}")
+        return False
+    return True
+
+def print_config():
+    """Muestra la configuración actual (sin valores sensibles)"""
+    print(f"📋 CONFIGURACIÓN - Entorno: {ENVIRONMENT}")
+    print(f"   🔗 CORS Origins: {ALLOWED_ORIGINS}")
+    print(f"   🔑 OpenAI API Key: {'✅ configurada' if OPENAI_API_KEY else '❌ faltante'}")
+    print(f"   🔑 DeepSeek API Key: {'✅ configurada' if DEEPSEEK_API_KEY else '❌ faltante'}")
+    print(f"   📦 Rate Limits: {RATE_LIMITS_CONFIG}")

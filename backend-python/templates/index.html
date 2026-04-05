@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Talent Pipeline Intelligence</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="p-8">
+
+<div class="max-w-7xl mx-auto">
+
+    <!-- Cabecera -->
+    <div class="mb-8">
+        <h1 class="text-4xl font-bold text-gray-800 mb-2">🎯 Talent Pipeline Intelligence</h1>
+        <p class="text-lg text-gray-600">Base de datos inteligente de talento por habilidades</p>
+    </div>
+
+    <!-- Stats rápidas -->
+    <div class="stats-grid" id="stats-container">
+        <div class="stats-card">
+            <div class="stats-number" id="total-candidatos">0</div>
+            <div class="stats-label">Candidatos en BD</div>
+        </div>
+        <div class="stats-card">
+            <div class="stats-number" id="total-sectores">0</div>
+            <div class="stats-label">Sectores detectados</div>
+        </div>
+        <div class="stats-card">
+            <div class="stats-number" id="total-skills">0</div>
+            <div class="stats-label">Skills únicas</div>
+        </div>
+        <div class="stats-card">
+            <div class="stats-number" id="match-potencial">0%</div>
+            <div class="stats-label">Perfiles senior</div>
+        </div>
+    </div>
+
+    <!-- Controles -->
+    <div class="control-panel">
+        <input type="file" id="files" multiple accept=".pdf,.docx" class="file-input">
+        
+        <select id="model" class="select-model">
+            <option value="gpt">🤖 ChatGPT</option>
+            <option value="deepseek">🧠 DeepSeek</option>
+        </select>
+        
+        <button onclick="analyze()" class="btn btn-primary">
+            🔍 Analizar CVs
+        </button>
+        
+        <button onclick="exportExcel()" class="btn btn-success">
+            📊 Exportar Excel
+        </button>
+        
+        <button onclick="loadSavedCandidates()" class="btn btn-secondary">
+            🔄 Recargar BD
+        </button>
+    </div>
+
+    <!-- Barra de búsqueda avanzada (tradicional) -->
+    <div class="bg-white p-4 rounded-lg shadow-sm mb-4">
+        <h3 class="font-semibold mb-2">🔎 Búsqueda tradicional</h3>
+        <div class="flex gap-2 flex-wrap">
+            <input type="text" id="search-skills" placeholder="Habilidades (ej: Python, SQL)" class="border p-2 rounded flex-1">
+            <input type="text" id="search-sector" placeholder="Sector" class="border p-2 rounded">
+            <input type="number" id="search-score" placeholder="Score mínimo" class="border p-2 rounded w-32">
+            <button onclick="buscarAvanzado()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+                Buscar
+            </button>
+            <button onclick="loadSavedCandidates()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                Limpiar
+            </button>
+        </div>
+    </div>
+
+    <!-- Barra de búsqueda semántica (NUEVA) -->
+    <div class="bg-white p-4 rounded-lg shadow-sm mb-4 border-2 border-blue-200">
+        <h3 class="font-semibold mb-2 text-blue-800">🔮 BÚSQUEDA INTELIGENTE (Embeddings)</h3>
+        <p class="text-sm text-gray-600 mb-2">Escribe lo que buscas en lenguaje natural:</p>
+        <div class="flex gap-2 flex-wrap">
+            <input type="text" id="search-semantica" placeholder="Ej: secretaria bilingüe con office, gerente de ventas con inglés, programador python senior..." 
+                   class="border p-3 rounded flex-1 text-base">
+            <button onclick="buscarSemantica()" class="bg-blue-600 text-white px-6 py-3 rounded hover:bg-blue-700 font-semibold">
+                🔍 Buscar con IA
+            </button>
+            <button onclick="limpiarBusquedaSemantica()" class="bg-gray-500 text-white px-4 py-3 rounded hover:bg-gray-600">
+                Limpiar
+            </button>
+        </div>
+        <div id="semantica-info" class="text-sm text-gray-500 mt-2"></div>
+    </div>
+
+    <!-- Botón para ranking con ChatGPT (aparece después de búsqueda) -->
+    <div id="ranking-container" style="display: none;" class="mb-4">
+        <div class="bg-purple-100 p-4 rounded-lg border border-purple-300 flex justify-between items-center">
+            <div>
+                <span class="font-semibold text-purple-800">🎯 Resultados de búsqueda semántica</span>
+                <span id="resultados-count" class="ml-2 text-purple-600">0 candidatos</span>
+            </div>
+            <div class="flex gap-2">
+                <select id="ranking-model" class="border p-2 rounded">
+                    <option value="gpt">🤖 ChatGPT para ranking</option>
+                    <option value="deepseek">🧠 DeepSeek para ranking</option>
+                </select>
+                <button onclick="rankingConIA()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+                    ⚡ Mejorar ranking con IA
+                </button>
+            </div>
+        </div>
+        <div id="ranking-explicacion" class="mt-2 p-3 bg-purple-50 rounded text-sm"></div>
+    </div>
+
+    <!-- Estado -->
+    <div id="status" class="status-bar">
+        ⏳ Listo. Base de datos persistente activa.
+    </div>
+
+    <!-- TABLA PIPELINE -->
+    <div class="table-container">
+        <h2 class="text-xl font-semibold mb-4">📋 Pipeline de Talento</h2>
+        <table id="tabla-pipeline" class="display stripe" style="width:100%">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Sector</th>
+                    <th>Experiencia</th>
+                    <th>Seniority</th>
+                    <th>Perfil</th>
+                    <th>Skills Clave</th>
+                    <th>Score</th>
+                    <th>Acción</th>
+                </tr>
+            </thead>
+            <tbody id="tabla-body">
+            </tbody>
+        </table>
+    </div>
+
+    <!-- MODAL FICHA -->
+    <div id="modal-ficha" class="modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="cerrarModal()">✕</button>
+            <div id="modal-content" class="ficha-candidato">
+                <!-- Contenido dinámico -->
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+let globalData = [];
+let dataTable;
+let ultimosResultadosSemanticos = [];
+let ultimaBusquedaTexto = "";
+
+// ========================================
+// FUNCIONES AUXILIARES
+// ========================================
+
+function deducirSeniority(experiencia) {
+    if (!experiencia || experiencia === "No se pudo inferir") return "No determinado";
+    const expStr = experiencia.toString().toLowerCase();
+    const match = expStr.match(/(\d+)/);
+    if (match) {
+        let años = parseInt(match[0]);
+        if (años >= 8) return "Senior";
+        if (años >= 4) return "Semi-Senior";
+        if (años >= 1) return "Junior";
+    }
+    return "Trainee";
+}
+
+function actualizarStats() {
+    document.getElementById('total-candidatos').innerText = globalData.length;
+    
+    const sectores = new Set();
+    globalData.forEach(d => {
+        if (d.interpretacion?.sector_deducido) {
+            sectores.add(d.interpretacion.sector_deducido);
+        } else if (d.sector_principal) {
+            sectores.add(d.sector_principal);
+        }
+    });
+    document.getElementById('total-sectores').innerText = sectores.size;
+    
+    let todasSkills = [];
+    globalData.forEach(d => {
+        if (d.interpretacion?.habilidades_clave) {
+            todasSkills = todasSkills.concat(d.interpretacion.habilidades_clave);
+        } else if (d.habilidades) {
+            todasSkills = todasSkills.concat(d.habilidades);
+        }
+    });
+    document.getElementById('total-skills').innerText = new Set(todasSkills).size;
+    
+    const seniorCount = globalData.filter(d => {
+        const seniority = d.interpretacion?.seniority || deducirSeniority(d.anos_experiencia);
+        return seniority === "Senior" || seniority === "Lead";
+    }).length;
+    
+    const matchPorcent = globalData.length ? Math.round((seniorCount / globalData.length) * 100) : 0;
+    document.getElementById('match-potencial').innerText = matchPorcent + '%';
+}
+
+// ========================================
+// CARGA DE DATOS
+// ========================================
+
+async function loadSavedCandidates() {
+    document.getElementById("status").innerHTML = "📂 Cargando base de datos existente...";
+    document.getElementById("status").className = "status-bar analizando";
+    
+    try {
+        let res = await fetch("/candidates");
+        let data = await res.json();
+        
+        if (data.success && data.data.length > 0) {
+            globalData = data.data;
+            renderTabla();
+            document.getElementById("status").innerHTML = `✅ Base cargada: ${data.data.length} candidatos en pipeline`;
+            document.getElementById("status").className = "status-bar success";
+        } else {
+            document.getElementById("status").innerHTML = "📭 No hay candidatos guardados. Sube CVs para comenzar.";
+            document.getElementById("status").className = "status-bar";
+        }
+    } catch (error) {
+        document.getElementById("status").innerHTML = "📭 Base de datos vacía o error de conexión";
+        document.getElementById("status").className = "status-bar";
+    }
+}
+
+// ========================================
+// RENDERIZADO DE TABLA
+// ========================================
+
+function renderTabla() {
+    if (dataTable) {
+        dataTable.destroy();
+    }
+    
+    const tbody = document.getElementById('tabla-body');
+    tbody.innerHTML = '';
+    
+    globalData.forEach((candidato, index) => {
+        let nombre = candidato.datos_crudos?.nombre || candidato.nombre || 'No especificado';
+        let sector = candidato.interpretacion?.sector_deducido || candidato.sector_principal || 'No inferido';
+        let experiencia = candidato.interpretacion?.anos_experiencia_deducidos || candidato.anos_experiencia || 'No inferido';
+        let seniority = candidato.interpretacion?.seniority || deducirSeniority(experiencia);
+        let perfilInterpretado = candidato.interpretacion?.perfil_interpretado || candidato.perfil_profesional || 'No disponible';
+        let habilidadesClave = candidato.interpretacion?.habilidades_clave || candidato.habilidades || [];
+        let score = candidato.score || 0;
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td class="font-medium">${nombre}</td>
+            <td><span class="badge badge-sector">${sector}</span></td>
+            <td>${experiencia}</td>
+            <td><span class="badge badge-seniority ${seniority.toLowerCase()}">${seniority}</span></td>
+            <td>${perfilInterpretado.substring(0, 60)}${perfilInterpretado.length > 60 ? '...' : ''}</td>
+            <td>
+                ${habilidadesClave.slice(0, 3).map(s => 
+                    `<span class="badge badge-skill">${s}</span>`
+                ).join('') || 'Sin skills'}
+                ${habilidadesClave.length > 3 ? `<span class="badge badge-skill">+${habilidadesClave.length-3}</span>` : ''}
+            </td>
+            <td><span class="font-bold ${score >= 80 ? 'text-green-600' : (score >= 60 ? 'text-blue-600' : (score >= 40 ? 'text-yellow-600' : 'text-red-600'))}">${score}</span></td>
+            <td>
+                <button class="btn-ver-ficha" data-index="${index}" 
+                        style="background-color: #3b82f6; color: white; border: none; 
+                               padding: 8px 12px; border-radius: 6px; cursor: pointer;
+                               font-size: 13px; font-weight: 500;">
+                    👤 Ver ficha
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    dataTable = $('#tabla-pipeline').DataTable({
+        language: { 
+            url: "https://cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json" 
+        },
+        pageLength: 10,
+        order: [[6, 'desc']]
+    });
+    
+    document.querySelectorAll('.btn-ver-ficha').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const index = this.getAttribute('data-index');
+            verFicha(globalData[index]);
+        });
+    });
+    
+    actualizarStats();
+}
+
+// ========================================
+// FICHA DETALLADA
+// ========================================
+
+function verFicha(candidato) {
+    const esNuevaEstructura = candidato.interpretacion ? true : false;
+    
+    let html = `
+        <div class="ficha-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #e2e8f0;">
+            <div>
+                <h2 class="ficha-nombre" style="font-size: 24px; font-weight: bold; margin: 0 0 5px 0;">${esNuevaEstructura ? candidato.datos_crudos?.nombre || 'Candidato' : candidato.nombre || 'Candidato'}</h2>
+                <p class="ficha-profesion" style="color: #4b5563; margin: 0;">${esNuevaEstructura ? candidato.datos_crudos?.profesion_escrita || '' : candidato.profesion || ''}</p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <span class="ficha-archivo" style="background: #e0f2fe; color: #0369a1; padding: 5px 12px; border-radius: 20px; font-size: 14px;">📎 ${candidato.archivo || 'CV'}</span>
+                <button onclick="verCV('${candidato.archivo}')" 
+                        style="background-color: #3b82f6; color: white; border: none; 
+                               padding: 8px 15px; border-radius: 8px; cursor: pointer;
+                               font-size: 14px; display: flex; align-items: center; gap: 5px;">
+                    👁️ Ver CV original
+                </button>
+            </div>
+        </div>
+    `;
+    
+    if (esNuevaEstructura) {
+        html += `
+        <div class="seccion-ficha" style="background-color: #f0f9ff; border-left: 4px solid #3b82f6; padding: 20px; margin-bottom: 25px; border-radius: 0 8px 8px 0;">
+            <h3 class="seccion-titulo" style="color: #1e40af; font-size: 18px; font-weight: 600; margin-top: 0; margin-bottom: 15px;">🤖 INTERPRETACIÓN IA</h3>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">📊 PERFIL INTERPRETADO</div>
+                <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; line-height: 1.6;">${candidato.interpretacion?.perfil_interpretado || 'No disponible'}</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">🏭 SECTOR DEDUCIDO</div>
+                    <div><span style="background: #dbeafe; color: #1e40af; padding: 5px 12px; border-radius: 20px; font-size: 16px;">${candidato.interpretacion?.sector_deducido || 'No inferido'}</span></div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">📅 EXPERIENCIA DEDUCIDA</div>
+                    <div><span style="background: #f1f5f9; padding: 5px 12px; border-radius: 20px;">${candidato.interpretacion?.anos_experiencia_deducidos || 'No inferido'}</span></div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">⭐ SENIORITY</div>
+                    <div><span style="background: ${candidato.interpretacion?.seniority === 'Senior' ? '#dcfce7' : (candidato.interpretacion?.seniority === 'Semi-Senior' ? '#fef9c3' : '#ffe4e6')}; color: ${candidato.interpretacion?.seniority === 'Senior' ? '#166534' : (candidato.interpretacion?.seniority === 'Semi-Senior' ? '#854d0e' : '#9f1239')}; padding: 5px 12px; border-radius: 20px;">${candidato.interpretacion?.seniority || 'No inferido'}</span></div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">🏢 INDUSTRIA PRINCIPAL</div>
+                    <div><span style="background: #dbeafe; color: #1e40af; padding: 5px 12px; border-radius: 20px;">${candidato.interpretacion?.industria_principal || 'No inferido'}</span></div>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">🏢 INDUSTRIAS SECUNDARIAS</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${candidato.interpretacion?.industrias_secundarias?.map(i => 
+                        `<span style="background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 16px; font-size: 13px;">${i}</span>`
+                    ).join('') || '<span style="color: #991b1b; background: #fee2e2; padding: 5px 12px; border-radius: 8px;">No especificadas</span>'}
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">🔑 HABILIDADES CLAVE (Top 5)</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${candidato.interpretacion?.habilidades_clave?.map(h => 
+                        `<span style="background: #f3e8ff; color: #6b21a8; padding: 5px 12px; border-radius: 20px; font-size: 14px;">⭐ ${h}</span>`
+                    ).join('') || '<span style="color: #991b1b; background: #fee2e2; padding: 5px 12px; border-radius: 8px;">No identificadas</span>'}
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">💪 FORTALEZAS</div>
+                    <ul style="margin: 0; padding-left: 20px;">
+                        ${candidato.interpretacion?.fortalezas?.map(f => `<li>${f}</li>`).join('') || '<li>No identificadas</li>'}
+                    </ul>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">📈 ÁREAS DE MEJORA</div>
+                    <ul style="margin: 0; padding-left: 20px;">
+                        ${candidato.interpretacion?.areas_mejora?.map(a => `<li>${a}</li>`).join('') || '<li>No identificadas</li>'}
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">👔 ROL TÍPICO</div>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">${candidato.interpretacion?.rol_tipico || 'No disponible'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">⚡ NIVEL DE IMPACTO</div>
+                    <div><span style="background: ${candidato.interpretacion?.nivel_impacto === 'Alto' ? '#dcfce7' : (candidato.interpretacion?.nivel_impacto === 'Medio' ? '#fef9c3' : '#fee2e2')}; color: ${candidato.interpretacion?.nivel_impacto === 'Alto' ? '#166534' : (candidato.interpretacion?.nivel_impacto === 'Medio' ? '#854d0e' : '#991b1b')}; padding: 5px 15px; border-radius: 20px;">${candidato.interpretacion?.nivel_impacto || 'No disponible'}</span></div>
+                </div>
+            </div>
+            
+            <div>
+                <div style="font-weight: 600; color: #4b5563; margin-bottom: 5px;">🎯 RECOMENDACIÓN</div>
+                <div style="background: #e6f7ff; padding: 15px; border-radius: 8px; border-left: 4px solid #0284c7;">${candidato.interpretacion?.recomendacion || 'No disponible'}</div>
+            </div>
+        </div>
+        
+        <div class="seccion-ficha" style="margin-bottom: 25px;">
+            <h3 class="seccion-titulo" style="font-size: 18px; font-weight: 600; margin-bottom: 15px;">📄 DATOS DEL CV (Sin interpretar)</h3>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 15px 0 10px 0;">Datos Personales</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">📞 Teléfono</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; ${!candidato.datos_crudos?.telefono ? 'color: #991b1b; background: #fee2e2;' : ''}">${candidato.datos_crudos?.telefono || '❌ No disponible'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">✉️ Email</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; ${!candidato.datos_crudos?.email ? 'color: #991b1b; background: #fee2e2;' : ''}">${candidato.datos_crudos?.email || '❌ No disponible'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">📍 Ubicación</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; ${!candidato.datos_crudos?.ubicacion ? 'color: #991b1b; background: #fee2e2;' : ''}">${candidato.datos_crudos?.ubicacion || '❌ No disponible'}</div>
+                </div>
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Formación</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">🎓 Carrera</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px;">${candidato.datos_crudos?.profesion_escrita || 'No especificada'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">🏛️ Universidad</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px;">${candidato.datos_crudos?.universidad || 'No especificada'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">📜 Grado</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px;">${candidato.datos_crudos?.grado_academico || 'No especificado'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280; font-size: 13px; margin-bottom: 3px;">📅 Año</div>
+                    <div style="background: #f8fafc; padding: 8px 12px; border-radius: 8px;">${candidato.datos_crudos?.anio_graduacion || 'No especificado'}</div>
+                </div>
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Certificaciones</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                ${candidato.datos_crudos?.certificaciones?.map(c => 
+                    `<span style="background: #fff1f0; color: #b91c1c; padding: 5px 12px; border-radius: 20px; border: 1px solid #ffccc7;">📜 ${c}</span>`
+                ).join('') || '<span style="color: #991b1b; background: #fee2e2; padding: 5px 12px; border-radius: 8px;">No hay certificaciones</span>'}
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Perfil (textual del CV)</h4>
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; line-height: 1.6;">${candidato.datos_crudos?.perfil_textual || 'No disponible'}</div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Habilidades (listadas en CV)</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                ${candidato.datos_crudos?.habilidades_listadas?.map(h => 
+                    `<span style="background: #f3e8ff; color: #6b21a8; padding: 5px 12px; border-radius: 20px;">${h}</span>`
+                ).join('') || 'No hay habilidades listadas'}
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Herramientas</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                ${candidato.datos_crudos?.herramientas_listadas?.map(h => 
+                    `<span style="background: #ecfdf5; color: #065f46; padding: 5px 12px; border-radius: 20px; border: 1px solid #a7f3d0;">⚙️ ${h}</span>`
+                ).join('') || 'No hay herramientas'}
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Idiomas</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                ${candidato.datos_crudos?.idiomas_listados?.map(i => 
+                    `<span style="background: #fffbeb; color: #92400e; padding: 5px 12px; border-radius: 20px; border: 1px solid #fcd34d;">${i}</span>`
+                ).join('') || 'No hay idiomas'}
+            </div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Pretensión Salarial</h4>
+            <div style="background: #f8fafc; padding: 10px 15px; border-radius: 8px;">${candidato.datos_crudos?.pretension_salarial || 'No especificada'}</div>
+            
+            <h4 style="font-size: 16px; font-weight: 600; margin: 20px 0 10px 0;">Disponibilidad</h4>
+            <div style="background: #f8fafc; padding: 10px 15px; border-radius: 8px;">${candidato.datos_crudos?.disponibilidad || 'No especificada'}</div>
+        </div>
+        `;
+    } else {
+        // Versión simplificada para estructura antigua
+        html += `
+        <div class="seccion-ficha">
+            <h3 class="seccion-titulo">📋 Datos Personales</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div>
+                    <div style="font-weight: 600; color: #6b7280;">📞 Teléfono</div>
+                    <div>${candidato.telefono || 'No disponible'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280;">✉️ Email</div>
+                    <div>${candidato.email || 'No disponible'}</div>
+                </div>
+                <div>
+                    <div style="font-weight: 600; color: #6b7280;">📍 Ubicación</div>
+                    <div>${candidato.ubicacion || 'No disponible'}</div>
+                </div>
+            </div>
+            
+            <h3 class="seccion-titulo" style="margin-top: 20px;">🎓 Formación</h3>
+            <div><strong>Profesión:</strong> ${candidato.profesion || 'No especificada'}</div>
+            <div><strong>Universidad:</strong> ${candidato.universidad || 'No especificada'}</div>
+            
+            <h3 class="seccion-titulo" style="margin-top: 20px;">💼 Experiencia</h3>
+            <div><strong>Años:</strong> ${candidato.anos_experiencia || 'No especificado'}</div>
+            <div><strong>Perfil:</strong> ${candidato.perfil_profesional || 'No disponible'}</div>
+        </div>
+        `;
+    }
+    
+    html += `
+        <div style="margin-top: 25px; padding-top: 15px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <span style="font-weight: 600;">Score IA:</span> 
+                <span style="font-size: 24px; font-weight: bold; ${candidato.score >= 80 ? 'color: #16a34a;' : (candidato.score >= 60 ? 'color: #2563eb;' : (candidato.score >= 40 ? 'color: #ca8a04;' : 'color: #dc2626;'))}">
+                    ${candidato.score || 0}
+                </span>
+                /100
+            </div>
+            <div>
+                <span style="font-weight: 600;">Criterio:</span> 
+                <span style="padding: 5px 15px; border-radius: 20px; font-size: 14px; background: ${
+                    candidato.criterio_ai?.includes('Alta') ? '#dcfce7' :
+                    candidato.criterio_ai?.includes('media-alta') ? '#dbeafe' :
+                    candidato.criterio_ai?.includes('media') ? '#fef9c3' :
+                    '#fee2e2'
+                }; color: ${
+                    candidato.criterio_ai?.includes('Alta') ? '#166534' :
+                    candidato.criterio_ai?.includes('media-alta') ? '#1e40af' :
+                    candidato.criterio_ai?.includes('media') ? '#854d0e' :
+                    '#991b1b'
+                };">
+                    ${candidato.criterio_ai || 'No disponible'}
+                </span>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('modal-content').innerHTML = html;
+    document.getElementById('modal-ficha').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function cerrarModal() {
+    document.getElementById('modal-ficha').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+// ========================================
+// ANÁLISIS DE CVs
+// ========================================
+
+async function analyze() {
+    let files = document.getElementById("files").files;
+    
+    if (files.length === 0) {
+        alert("Selecciona al menos un CV para analizar");
+        return;
+    }
+    
+    let model = document.getElementById("model").value;
+    let formData = new FormData();
+    
+    for (let f of files) {
+        formData.append("files", f);
+    }
+    formData.append("model", model);
+    
+    document.getElementById("status").innerHTML = `🤖 Analizando ${files.length} CV(s) con IA...`;
+    document.getElementById("status").className = "status-bar analizando";
+    
+    try {
+        let res = await fetch("/analyze", {
+            method: "POST",
+            body: formData
+        });
+        
+        let data = await res.json();
+        
+        if (!data.success) {
+            document.getElementById("status").innerHTML = `❌ Error: ${data.error}`;
+            document.getElementById("status").className = "status-bar error";
+            return;
+        }
+        
+        await loadSavedCandidates();
+        
+        document.getElementById("status").innerHTML = 
+            `✅ Análisis completado: ${data.stats.nuevos} nuevos, ${data.stats.existentes} ya existían. Total en BD: ${data.stats.total_bd}`;
+        document.getElementById("status").className = "status-bar success";
+        
+    } catch (error) {
+        document.getElementById("status").innerHTML = `❌ Error de conexión: ${error.message}`;
+        document.getElementById("status").className = "status-bar error";
+    }
+}
+
+// ========================================
+// BÚSQUEDA AVANZADA (tradicional)
+// ========================================
+
+async function buscarAvanzado() {
+    const skills = document.getElementById('search-skills').value.split(',').map(s => s.trim()).filter(s => s);
+    const sector = document.getElementById('search-sector').value.trim();
+    const minScore = document.getElementById('search-score').value;
+    
+    if (skills.length === 0 && !sector && !minScore) {
+        alert('Ingresa al menos un criterio de búsqueda');
+        return;
+    }
+    
+    let url = '/search?';
+    const params = [];
+    
+    skills.forEach(s => params.push(`skills[]=${encodeURIComponent(s)}`));
+    if (sector) params.push(`sector=${encodeURIComponent(sector)}`);
+    if (minScore) params.push(`min_score=${minScore}`);
+    
+    url += params.join('&');
+    
+    document.getElementById("status").innerHTML = "🔍 Buscando candidatos...";
+    document.getElementById("status").className = "status-bar analizando";
+    
+    try {
+        let res = await fetch(url);
+        let data = await res.json();
+        
+        if (data.success) {
+            if (data.count > 0) {
+                let mensaje = `🔍 Encontrados ${data.count} candidatos:\n\n`;
+                data.data.forEach((c, i) => {
+                    mensaje += `${i+1}. ${c.nombre || 'Sin nombre'} - ${c.profesion || 'Sin profesión'}\n`;
+                    mensaje += `   Sector: ${c.sector || 'No especificado'} | Score: ${c.score}\n\n`;
+                });
+                alert(mensaje);
+                
+                document.getElementById("status").innerHTML = `✅ ${data.count} candidatos encontrados`;
+                document.getElementById("status").className = "status-bar success";
+            } else {
+                alert('No se encontraron candidatos con esos criterios');
+                document.getElementById("status").innerHTML = "❌ No se encontraron resultados";
+                document.getElementById("status").className = "status-bar error";
+            }
+        }
+    } catch (error) {
+        alert('Error en la búsqueda');
+        document.getElementById("status").innerHTML = "❌ Error en búsqueda";
+        document.getElementById("status").className = "status-bar error";
+    }
+}
+
+// ========================================
+// BÚSQUEDA SEMÁNTICA CON EMBEDDINGS
+// ========================================
+
+async function buscarSemantica() {
+    const query = document.getElementById('search-semantica').value.trim();
+    
+    if (!query) {
+        alert('Escribe qué tipo de perfil buscas');
+        return;
+    }
+    
+    document.getElementById("status").innerHTML = "🔮 Buscando con embeddings...";
+    document.getElementById("status").className = "status-bar analizando";
+    document.getElementById("semantica-info").innerHTML = "Procesando búsqueda semántica...";
+    
+    try {
+        let res = await fetch("/search-embedding", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: query, limite: 20 })
+        });
+        
+        let data = await res.json();
+        
+        if (data.success) {
+            ultimosResultadosSemanticos = data.data;
+            ultimaBusquedaTexto = query;
+            
+            globalData = data.data;
+            renderTabla();
+            
+            document.getElementById("semantica-info").innerHTML = 
+                `✅ Búsqueda semántica: ${data.count} candidatos encontrados en 50ms`;
+            
+            document.getElementById("resultados-count").innerHTML = 
+                `${data.count} candidatos para: "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"`;
+            
+            document.getElementById("ranking-container").style.display = "block";
+            document.getElementById("ranking-explicacion").innerHTML = "";
+            
+            document.getElementById("status").innerHTML = 
+                `✅ ${data.count} candidatos encontrados por similitud semántica`;
+            document.getElementById("status").className = "status-bar success";
+        } else {
+            alert('Error en búsqueda: ' + data.error);
+        }
+    } catch (error) {
+        alert('Error de conexión');
+        document.getElementById("status").innerHTML = "❌ Error en búsqueda";
+        document.getElementById("status").className = "status-bar error";
+    }
+}
+
+// ========================================
+// RANKING FINO CON CHATGPT
+// ========================================
+
+async function rankingConIA() {
+    if (ultimosResultadosSemanticos.length === 0) {
+        alert('Primero haz una búsqueda semántica');
+        return;
+    }
+    
+    const model = document.getElementById("ranking-model").value;
+    
+    document.getElementById("status").innerHTML = "🤖 Mejorando ranking con IA...";
+    document.getElementById("status").className = "status-bar analizando";
+    document.getElementById("ranking-explicacion").innerHTML = "Procesando con ChatGPT...";
+    
+    try {
+        let res = await fetch("/ranking-ia", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                candidatos: ultimosResultadosSemanticos,
+                query: ultimaBusquedaTexto,
+                model: model
+            })
+        });
+        
+        let data = await res.json();
+        
+        if (data.success) {
+            globalData = data.data;
+            renderTabla();
+            
+            let explicacion = `
+                <div style="padding: 12px;">
+                    <p style="font-weight: 600; color: #6b21a8; margin-bottom: 8px;">🏆 Mejor candidato según IA:</p>
+                    <p style="margin-bottom: 10px;">${data.explicacion || 'No disponible'}</p>
+                    ${data.analisis ? `<p style="font-size: 13px; color: #4b5563; margin-top: 8px;">📊 Análisis: ${data.analisis}</p>` : ''}
+                </div>
+            `;
+            document.getElementById("ranking-explicacion").innerHTML = explicacion;
+            
+            document.getElementById("status").innerHTML = "✅ Ranking mejorado con IA";
+            document.getElementById("status").className = "status-bar success";
+        } else {
+            alert('Error en ranking: ' + data.error);
+        }
+    } catch (error) {
+        alert('Error de conexión');
+        document.getElementById("status").innerHTML = "❌ Error en ranking";
+        document.getElementById("status").className = "status-bar error";
+    }
+}
+
+function limpiarBusquedaSemantica() {
+    document.getElementById('search-semantica').value = '';
+    document.getElementById('semantica-info').innerHTML = '';
+    document.getElementById('ranking-container').style.display = 'none';
+    document.getElementById('ranking-explicacion').innerHTML = '';
+    loadSavedCandidates();
+}
+
+// ========================================
+// EXPORTACIÓN
+// ========================================
+
+function exportExcel() {
+    if (globalData.length === 0) {
+        alert("No hay datos para exportar");
+        return;
+    }
+    
+    fetch("/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(globalData)
+    })
+    .then(res => res.blob())
+    .then(blob => {
+        let url = window.URL.createObjectURL(blob);
+        let a = document.createElement("a");
+        a.href = url;
+        a.download = "talent_pipeline.xlsx";
+        a.click();
+    });
+}
+
+// ========================================
+// VER CV ORIGINAL
+// ========================================
+
+function verCV(filename) {
+    if (!filename) {
+        alert('No hay archivo asociado a este candidato');
+        return;
+    }
+    
+    const url = '/view-cv/' + encodeURIComponent(filename);
+    console.log('Abriendo:', url);
+    window.open(url, '_blank');
+}
+
+// ========================================
+// EVENTOS
+// ========================================
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        cerrarModal();
+    }
+});
+
+window.onclick = function(event) {
+    let modal = document.getElementById('modal-ficha');
+    if (event.target === modal) {
+        cerrarModal();
+    }
+}
+
+$(document).ready(function(){
+    loadSavedCandidates();
+});
+
+</script>
+
+</body>
+</html>

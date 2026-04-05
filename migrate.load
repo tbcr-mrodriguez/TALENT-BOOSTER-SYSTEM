@@ -1,0 +1,16 @@
+LOAD DATABASE
+     FROM sqlite://database/talent_pipeline.db
+     INTO postgresql://talent_user:Talent123!@localhost:5432/talent_pipeline
+
+WITH include drop, create tables, create indexes, reset sequences,
+     batch rows = 1000, batch concurrency = 1
+
+SET work_mem = '16MB',
+    maintenance_work_mem = '512 MB'
+
+CAST type datetime to timestamptz drop default drop not null using zero-dates-to-null,
+     type timestamp to timestamptz drop default drop not null using zero-dates-to-null,
+     type integer to integer,
+     type real to real,
+     type text to text,
+     type boolean to boolean;
