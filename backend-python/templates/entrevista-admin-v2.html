@@ -12,6 +12,9 @@
         .fase-card:hover { border-color: #2563eb; }
         .pregunta-item { background: #f8fafc; border-left: 4px solid #2563eb; }
         .drag-handle { cursor: move; }
+        .badge-impacto-alto { background: #d1fae5; color: #065f46; }
+        .badge-impacto-medio { background: #fed7aa; color: #9a3412; }
+        .badge-impacto-bajo { background: #fee2e2; color: #991b1b; }
     </style>
 </head>
 <body class="bg-gray-100 p-8">
@@ -369,72 +372,29 @@
         }
 
         function limpiarFormulario() {
-            fases = [];
-            renderizarFases();
-            document.getElementById('formPlantilla').reset();
-            $('#seccionPuesto').addClass('hidden');
-            // Valores por defecto anti-trampas
-            document.getElementById('max_advertencias').value = '3';
-            document.getElementById('intentos_por_pregunta').value = '2';
-            document.getElementById('tiempo_instrucciones').value = '60';
-        }
-
-        // Guardar plantilla
-        document.getElementById('formPlantilla').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const plantilla = {
-                nombre: document.getElementById('nombrePlantilla').value,
-                tipo: document.getElementById('tipoPlantilla').value,
-                descripcion: document.getElementById('descripcionPlantilla').value,
-                objetivo: document.getElementById('objetivoPlantilla').value,
-                perfil_puesto: {
-                    titulo: document.getElementById('puestoTitulo').value,
-                    seniority: document.getElementById('puestoSeniority').value,
-                    responsabilidades: document.getElementById('puestoResponsabilidades').value.split('\n').filter(l => l.trim()),
-                    requisitos: document.getElementById('puestoRequisitos').value.split('\n').filter(l => l.trim())
-                },
-                cultura_empresa: {
-                    valores: document.getElementById('culturaValores').value.split(',').map(v => v.trim()),
-                    ambiente: document.getElementById('culturaAmbiente').value
-                },
-                // Configuración Anti-Trampas
-                max_advertencias: parseInt(document.getElementById('max_advertencias').value),
-                intentos_por_pregunta: parseInt(document.getElementById('intentos_por_pregunta').value),
-                tiempo_instrucciones: parseInt(document.getElementById('tiempo_instrucciones').value),
-                fases: fases.map(f => ({
-                    nombre: f.nombre,
-                    descripcion: f.descripcion,
-                    preguntas: f.preguntas.map(p => ({
-                        pregunta: p.pregunta,
-                        objetivo: p.objetivo,
-                        criterio_star: p.criterio_star,
-                        competencia: p.competencia,
-                        peso: p.peso
-                    }))
-                }))
-            };
-            
-            try {
-                const res = await fetch('/api/admin/plantilla-v2', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(plantilla)
-                });
-                const data = await res.json();
-                if (data.success) {
-                    alert('✅ Plantilla guardada exitosamente');
-                    limpiarFormulario();
-                    cargarPlantillas();
-                    $('.tab-btn[data-tab="lista"]').click();
-                } else {
-                    alert('Error: ' + data.error);
-                }
-            } catch (error) {
-                alert('Error al guardar');
-            }
-        });
-
+    // Resetear fases
+    fases = [];
+    faseCounter = 0;
+    window.plantillaEditandoId = null;  // 🔥 IMPORTANTE: resetear el ID
+    renderizarFases();
+    
+    // Resetear formulario
+    document.getElementById('formPlantilla').reset();
+    
+    // Ocultar sección de puesto
+    $('#seccionPuesto').addClass('hidden');
+    
+    // Resetear valores por defecto anti-trampas
+    document.getElementById('max_advertencias').value = '3';
+    document.getElementById('intentos_por_pregunta').value = '2';
+    document.getElementById('tiempo_instrucciones').value = '60';
+    
+    // Resetear texto del botón de submit
+    const submitBtn = document.querySelector('#formPlantilla button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.textContent = 'Guardar Plantilla';
+    }
+}
         async function cargarPlantillas() {
             try {
                 const res = await fetch('/api/admin/plantillas-v2');
@@ -463,6 +423,11 @@
                                 <button onclick="verPlantilla(${p.id})" class="text-blue-600 text-sm hover:underline">Ver detalles</button>
                                 <button onclick="usarPlantilla(${p.id})" class="text-green-600 text-sm hover:underline">Usar</button>
                             </div>
+                            <div class="flex justify-end gap-2 mt-3 pt-3 border-t">
+    <button onclick="verPlantilla(${p.id})" class="text-blue-600 text-sm hover:underline">Ver detalles</button>
+    <button onclick="editarPlantilla(${p.id})" class="text-yellow-600 text-sm hover:underline">✏️ Editar</button>
+    <button onclick="usarPlantilla(${p.id})" class="text-green-600 text-sm hover:underline">Usar</button>
+</div>
                         </div>
                     `).join('');
                 }
@@ -479,36 +444,289 @@
             alert('Redirigiendo a creación de entrevista con esta plantilla');
         }
 
-        // Carga desde archivo JSON
-        document.getElementById('filePlantilla').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+
+        
+
+        async function editarPlantilla(id) {
+    try {
+        const res = await fetch(`/api/admin/plantilla-v2/${id}`);
+        const data = await res.json();
+        
+        if (data.success && data.plantilla) {
+            // Limpiar formulario actual
+            limpiarFormulario();
             
-            document.getElementById('nombreArchivo').textContent = file.name;
+            // Cargar datos básicos
+            document.getElementById('nombrePlantilla').value = data.plantilla.nombre || '';
+            document.getElementById('tipoPlantilla').value = data.plantilla.tipo || 'generica';
+            document.getElementById('descripcionPlantilla').value = data.plantilla.descripcion || '';
+            document.getElementById('objetivoPlantilla').value = data.plantilla.objetivo || '';
             
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                try {
-                    const plantilla = JSON.parse(event.target.result);
-                    const res = await fetch('/api/admin/plantilla-v2', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(plantilla)
+            // Configuración anti-trampas
+            document.getElementById('max_advertencias').value = data.plantilla.max_advertencias || 3;
+            document.getElementById('intentos_por_pregunta').value = data.plantilla.intentos_por_pregunta || 2;
+            document.getElementById('tiempo_instrucciones').value = data.plantilla.tiempo_instrucciones || 60;
+            
+            // Perfil del puesto (si es específica)
+            if (data.plantilla.perfil_puesto) {
+                document.getElementById('puestoTitulo').value = data.plantilla.perfil_puesto.titulo || '';
+                document.getElementById('puestoSeniority').value = data.plantilla.perfil_puesto.seniority || '';
+                document.getElementById('puestoResponsabilidades').value = (data.plantilla.perfil_puesto.responsabilidades || []).join('\n');
+                document.getElementById('puestoRequisitos').value = (data.plantilla.perfil_puesto.requisitos || []).join('\n');
+            }
+            
+            // Cultura de la empresa
+            if (data.plantilla.cultura_empresa) {
+                document.getElementById('culturaValores').value = (data.plantilla.cultura_empresa.valores || []).join(', ');
+                document.getElementById('culturaAmbiente').value = data.plantilla.cultura_empresa.ambiente || '';
+            }
+            
+            // Mostrar sección de puesto si es específica
+            if (data.plantilla.tipo === 'especifica') {
+                $('#seccionPuesto').removeClass('hidden');
+            }
+            
+            // Cargar fases y preguntas
+            fases = [];
+            if (data.plantilla.fases && Array.isArray(data.plantilla.fases)) {
+                data.plantilla.fases.forEach((fase) => {
+                    const faseId = faseCounter++;
+                    const preguntas = (fase.preguntas || []).map(p => ({
+                        id: Date.now() + Math.random(),
+                        pregunta: p.pregunta || '',
+                        objetivo: p.objetivo || '',
+                        criterio_star: p.criterio_star || '',
+                        competencia: p.competencia || '',
+                        peso: p.peso || 1
+                    }));
+                    fases.push({
+                        id: faseId,
+                        nombre: fase.nombre || '',
+                        descripcion: fase.descripcion || '',
+                        preguntas: preguntas
                     });
-                    const data = await res.json();
-                    if (data.success) {
-                        alert('✅ Plantilla cargada exitosamente');
-                        cargarPlantillas();
-                        $('.tab-btn[data-tab="lista"]').click();
-                    } else {
-                        alert('Error: ' + data.error);
+                });
+            }
+            renderizarFases();
+            
+            // Guardar el ID de la plantilla para la actualización
+            window.plantillaEditandoId = id;
+            
+            // Cambiar texto del botón de guardar
+            const submitBtn = document.querySelector('#formPlantilla button[type="submit"]');
+            submitBtn.textContent = '✏️ Actualizar Plantilla';
+            
+            // Cambiar a la pestaña de creación
+            $('.tab-btn[data-tab="crear"]').click();
+        } else {
+            alert('Error: ' + (data.error || 'No se pudo cargar la plantilla'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error al cargar la plantilla para editar');
+    }
+}
+
+async function verPlantilla(id) {
+    try {
+        const res = await fetch(`/api/admin/plantilla-v2/${id}`);
+        const data = await res.json();
+        
+        if (data.success && data.plantilla) {
+            const p = data.plantilla;
+            
+            const totalFases = p.fases?.length || 0;
+            const totalPreguntas = p.fases?.reduce((sum, f) => sum + (f.preguntas?.length || 0), 0) || 0;
+            
+            const html = `
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Inter:400,500,600,700&display=swap');
+                    .preview-font { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+                    .phase-card {
+                        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                     }
-                } catch (err) {
-                    alert('Error al parsear el archivo JSON');
-                }
-            };
-            reader.readAsText(file);
-        });
+                    .phase-card:hover {
+                        transform: translateX(2px);
+                        border-left-color: #18181b !important;
+                    }
+                    .question-item {
+                        transition: all 0.15s ease;
+                        border-bottom: 1px solid #f4f4f5;
+                    }
+                    .question-item:last-child {
+                        border-bottom: none;
+                    }
+                    .question-item:hover {
+                        background: #fafafa;
+                    }
+                    .metric-card {
+                        transition: all 0.2s ease;
+                        background: white;
+                    }
+                    .metric-card:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+                    }
+                </style>
+                
+                <div class="preview-font space-y-6">
+                    <!-- Header oscuro elegante -->
+                    <div class="relative overflow-hidden rounded-2xl p-6" style="background: linear-gradient(135deg, #18181b 0%, #27272a 100%);">
+                        <div class="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-32 -mt-32"></div>
+                        <div class="relative z-10">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="text-3xl">${p.tipo === 'generica' ? '📋' : '🎯'}</span>
+                                        <h2 class="text-2xl font-bold text-white tracking-tight">${escapeHtml(p.nombre)}</h2>
+                                    </div>
+                                    <p class="text-zinc-400 text-sm max-w-md">${escapeHtml(p.descripcion || 'Sin descripción')}</p>
+                                </div>
+                                <span class="px-3 py-1.5 rounded-full text-xs font-mono font-semibold bg-white/10 text-zinc-300 backdrop-blur-sm border border-white/10">
+                                    ${p.tipo === 'generica' ? 'GENERIC' : 'SPECIFIC'}
+                                </span>
+                            </div>
+                            <div class="flex gap-6 mt-4 text-xs text-zinc-500 font-mono">
+                                <div class="flex items-center gap-1.5">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                    ${new Date(p.fecha_creacion).toLocaleDateString()}
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                    ${totalFases} phases
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                    ${totalPreguntas} questions
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Métricas minimalistas -->
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="metric-card border border-zinc-100 rounded-xl p-3.5 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-2xl opacity-60">🛡️</span>
+                                <span class="text-2xl font-semibold text-zinc-800">${p.max_advertencias || 3}</span>
+                            </div>
+                            <div class="text-xs text-zinc-400 mt-1 font-mono">MAX_WARNINGS</div>
+                        </div>
+                        <div class="metric-card border border-zinc-100 rounded-xl p-3.5 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-2xl opacity-60">🔄</span>
+                                <span class="text-2xl font-semibold text-zinc-800">${p.intentos_por_pregunta || 2}</span>
+                            </div>
+                            <div class="text-xs text-zinc-400 mt-1 font-mono">ATTEMPTS</div>
+                        </div>
+                        <div class="metric-card border border-zinc-100 rounded-xl p-3.5 shadow-sm">
+                            <div class="flex items-center justify-between">
+                                <span class="text-2xl opacity-60">⏱️</span>
+                                <span class="text-2xl font-semibold text-zinc-800">${p.tiempo_instrucciones || 60}s</span>
+                            </div>
+                            <div class="text-xs text-zinc-400 mt-1 font-mono">INSTRUCTION_TIME</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Objetivo con borde lateral -->
+                    ${p.objetivo ? `
+                    <div class="rounded-xl p-4 bg-zinc-50/50 border-l-2 border-zinc-800">
+                        <div class="flex items-start gap-3">
+                            <span class="text-lg opacity-60">🎯</span>
+                            <p class="text-sm text-zinc-600 leading-relaxed">${escapeHtml(p.objetivo)}</p>
+                        </div>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Perfil del puesto -->
+                    ${p.tipo === 'especifica' && p.perfil_puesto && (p.perfil_puesto.titulo || p.perfil_puesto.responsabilidades?.length) ? `
+                    <div class="border border-zinc-100 rounded-xl p-4 bg-white shadow-sm">
+                        <h3 class="text-sm font-semibold text-zinc-700 mb-3 flex items-center gap-2">
+                            <span>🎯</span> ROLE PROFILE
+                        </h3>
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                            ${p.perfil_puesto.titulo ? `<div><div class="text-xs text-zinc-400 font-mono tracking-wide">TITLE</div><div class="text-sm font-medium text-zinc-800 mt-0.5">${escapeHtml(p.perfil_puesto.titulo)}</div></div>` : ''}
+                            ${p.perfil_puesto.seniority ? `<div><div class="text-xs text-zinc-400 font-mono tracking-wide">SENIORITY</div><div class="text-sm font-medium text-zinc-800 mt-0.5 capitalize">${escapeHtml(p.perfil_puesto.seniority)}</div></div>` : ''}
+                        </div>
+                        ${p.perfil_puesto.responsabilidades?.length ? `
+                            <div class="mt-2">
+                                <div class="text-xs text-zinc-400 font-mono tracking-wide mb-1.5">RESPONSIBILITIES</div>
+                                <div class="flex flex-wrap gap-1.5">
+                                    ${p.perfil_puesto.responsabilidades.map(r => `<span class="text-xs bg-zinc-50 text-zinc-600 px-2 py-1 rounded-md border border-zinc-100">${escapeHtml(r)}</span>`).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Preguntas - estilo terminal/mono minimalista -->
+                    <div>
+                        <h3 class="text-sm font-semibold text-zinc-700 mb-4 flex items-center gap-2">
+                            <span>📋</span> INTERVIEW STRUCTURE
+                        </h3>
+                        <div class="space-y-3">
+                            ${p.fases?.map((fase, idx) => `
+                                <div class="phase-card border-l-2 border-zinc-200 bg-white rounded-lg overflow-hidden transition-all">
+                                    <div class="p-4">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <div class="flex items-center gap-2">
+                                                <div class="w-6 h-6 rounded-full bg-zinc-800 text-white flex items-center justify-center text-xs font-mono font-bold">${idx + 1}</div>
+                                                <h4 class="font-semibold text-zinc-800">${escapeHtml(fase.nombre || 'Sin nombre')}</h4>
+                                            </div>
+                                            <span class="text-xs font-mono text-zinc-400">${fase.preguntas?.length || 0} q</span>
+                                        </div>
+                                        ${fase.descripcion ? `<p class="text-xs text-zinc-500 ml-8 mb-3">${escapeHtml(fase.descripcion)}</p>` : ''}
+                                        <div class="space-y-0 ml-8">
+                                            ${fase.preguntas?.map((preg, pidx) => `
+                                                <div class="question-item py-2.5 px-2 rounded-lg transition-all">
+                                                    <div class="flex items-start gap-2">
+                                                        <span class="text-xs font-mono text-zinc-400 mt-0.5">${String(pidx + 1).padStart(2, '0')}</span>
+                                                        <div class="flex-1">
+                                                            <p class="text-sm text-zinc-800">${escapeHtml(preg.pregunta || 'Pregunta sin texto')}</p>
+                                                            <div class="flex flex-wrap gap-3 mt-1.5">
+                                                                ${preg.objetivo ? `<span class="text-xs text-zinc-500 flex items-center gap-1"><span>🎯</span> ${escapeHtml(preg.objetivo)}</span>` : ''}
+                                                                ${preg.competencia ? `<span class="text-xs text-zinc-500 flex items-center gap-1"><span>📊</span> ${escapeHtml(preg.competencia)}</span>` : ''}
+                                                            </div>
+                                                            ${preg.criterio_star ? `
+                                                                <div class="mt-1.5 text-xs text-zinc-400 flex items-start gap-1">
+                                                                    <span>⭐</span>
+                                                                    <span class="font-mono">${escapeHtml(preg.criterio_star.substring(0, 100))}${preg.criterio_star.length > 100 ? '...' : ''}</span>
+                                                                </div>
+                                                            ` : ''}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('previewTitulo').innerHTML = `<span class="text-xl mr-2">✨</span>${escapeHtml(p.nombre)}`;
+            document.getElementById('previewContenido').innerHTML = html;
+            document.getElementById('modalPreview').classList.remove('hidden');
+        } else {
+            alert('Error al cargar la plantilla');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error al cargar la vista previa');
+    }
+}
+// Función auxiliar para escapar HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
         function cerrarModal() {
             document.getElementById('modalPreview').classList.add('hidden');

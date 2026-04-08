@@ -10,6 +10,14 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         * { font-family: 'Inter', sans-serif; }
+        .filter-input, .filter-select {
+            transition: all 0.2s;
+        }
+        .filter-input:focus, .filter-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            ring: 2px solid #3b82f6;
+        }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -33,15 +41,91 @@
         <button onclick="cambiarTab('postulaciones')" id="tab-postulaciones" class="px-6 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300">📊 Postulaciones</button>
     </div>
 
+    <!-- Panel de filtros para Puestos -->
+    <div id="filtros-puestos" class="bg-white rounded-xl shadow-md p-4 mb-4">
+        <div class="flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">🔍 Buscar (título o cliente)</label>
+                <input type="text" id="filtro-puesto-titulo" placeholder="Escribe para filtrar..." class="filter-input w-full px-3 py-2 border rounded-lg text-sm" oninput="aplicarFiltrosPuestos()">
+            </div>
+            <div class="w-40">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">🏢 Cliente</label>
+                <select id="filtro-puesto-cliente" class="filter-select w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="">Todos</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">⭐ Seniority</label>
+                <select id="filtro-puesto-seniority" class="filter-select w-full px-3 py-2 border rounded-lg text-sm bg-white" onchange="aplicarFiltrosPuestos()">
+                    <option value="">Todos</option>
+                    <option value="Trainee">Trainee</option>
+                    <option value="Junior">Junior</option>
+                    <option value="Semi-Senior">Semi-Senior</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Lead">Lead</option>
+                </select>
+            </div>
+            <div class="w-32">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">📅 Estado</label>
+                <select id="filtro-puesto-estado" class="filter-select w-full px-3 py-2 border rounded-lg text-sm bg-white" onchange="aplicarFiltrosPuestos()">
+                    <option value="">Todos</option>
+                    <option value="activo">✅ Activos</option>
+                    <option value="inactivo">⏸️ Inactivos</option>
+                </select>
+            </div>
+            <button onclick="limpiarFiltrosPuestos()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition text-sm">🗑️ Limpiar</button>
+        </div>
+    </div>
+
     <!-- Lista de puestos -->
     <div id="puestos-container">
         <div class="text-center py-12">Cargando puestos...</div>
     </div>
 
+    <!-- Panel de filtros para Postulaciones -->
+    <div id="filtros-postulaciones" class="bg-white rounded-xl shadow-md p-4 mb-4 hidden">
+        <div class="flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">🔍 Buscar candidato (nombre o email)</label>
+                <input type="text" id="filtro-postulacion-candidato" placeholder="Escribe para filtrar..." class="filter-input w-full px-3 py-2 border rounded-lg text-sm" oninput="aplicarFiltrosPostulaciones()">
+            </div>
+            <div class="w-40">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">🏢 Cliente</label>
+                <select id="filtro-postulacion-cliente" class="filter-select w-full px-3 py-2 border rounded-lg text-sm bg-white" onchange="aplicarFiltrosPostulaciones()">
+                    <option value="">Todos</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">📊 Estado</label>
+                <select id="filtro-postulacion-estado" class="filter-select w-full px-3 py-2 border rounded-lg text-sm bg-white" onchange="aplicarFiltrosPostulaciones()">
+                    <option value="">Todos</option>
+                    <option value="pendiente">⏳ Pendiente</option>
+                    <option value="revisado">📊 Revisado</option>
+                    <option value="contacto">📞 En contacto</option>
+                    <option value="entrevista">🎥 Entrevista</option>
+                    <option value="rechazado">❌ Rechazado</option>
+                    <option value="contratado">✅ Contratado</option>
+                </select>
+            </div>
+            <div class="w-32">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">🎯 Score mínimo</label>
+                <input type="number" id="filtro-postulacion-score" placeholder="70" class="filter-input w-full px-3 py-2 border rounded-lg text-sm" onchange="aplicarFiltrosPostulaciones()">
+            </div>
+            <div class="w-36">
+                <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">📅 Fecha desde</label>
+                <input type="date" id="filtro-postulacion-fecha" class="filter-input w-full px-3 py-2 border rounded-lg text-sm" onchange="aplicarFiltrosPostulaciones()">
+            </div>
+            <button onclick="limpiarFiltrosPostulaciones()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition text-sm">🗑️ Limpiar</button>
+        </div>
+    </div>
+
     <!-- Lista de postulaciones -->
     <div id="postulaciones-container" class="hidden">
         <div class="bg-white rounded-xl shadow-md p-6">
-            <h2 class="text-xl font-bold mb-4">📊 Postulaciones recibidas</h2>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">📊 Postulaciones recibidas</h2>
+                <span id="postulaciones-count" class="text-sm bg-gray-100 px-3 py-1 rounded-full"></span>
+            </div>
             <div id="postulaciones-list" class="space-y-4"></div>
         </div>
     </div>
@@ -57,138 +141,40 @@
         <div class="p-6">
             <form id="form-puesto">
                 <input type="hidden" id="puesto-id" name="id">
-                
-                <!-- Información básica -->
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Cliente *</label>
-                        <input type="text" id="cliente" name="cliente" required class="w-full px-3 py-2 border rounded-lg">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Título *</label>
-                        <input type="text" id="titulo" name="titulo" required class="w-full px-3 py-2 border rounded-lg">
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">Cliente *</label><input type="text" id="cliente" required class="w-full px-3 py-2 border rounded-lg"></div>
+                    <div><label class="block text-sm font-medium mb-1">Título *</label><input type="text" id="titulo" required class="w-full px-3 py-2 border rounded-lg"></div>
                 </div>
-                
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1">Descripción</label>
-                    <textarea id="descripcion" rows="3" class="w-full px-3 py-2 border rounded-lg" placeholder="Describe las responsabilidades generales del puesto..."></textarea>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1">Requisitos</label>
-                    <textarea id="requisitos" rows="3" class="w-full px-3 py-2 border rounded-lg" placeholder="• Mínimo X años de experiencia\n• Conocimiento en..."></textarea>
-                </div>
-                
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">Descripción</label><textarea id="descripcion" rows="3" class="w-full px-3 py-2 border rounded-lg"></textarea></div>
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">Requisitos</label><textarea id="requisitos" rows="3" class="w-full px-3 py-2 border rounded-lg"></textarea></div>
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Habilidades requeridas</label>
-                        <input type="text" id="habilidades" placeholder="Python, SQL, React" class="w-full px-3 py-2 border rounded-lg">
-                        <p class="text-xs text-gray-500 mt-1">Separadas por coma</p>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Seniority</label>
-                        <select id="seniority" class="w-full px-3 py-2 border rounded-lg">
-                            <option value="">Seleccione...</option>
-                            <option value="Trainee">Trainee</option>
-                            <option value="Junior">Junior</option>
-                            <option value="Semi-Senior">Semi-Senior</option>
-                            <option value="Senior">Senior</option>
-                            <option value="Lead">Lead</option>
-                        </select>
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">Habilidades requeridas</label><input type="text" id="habilidades" placeholder="Python, SQL, React" class="w-full px-3 py-2 border rounded-lg"><p class="text-xs text-gray-500 mt-1">Separadas por coma</p></div>
+                    <div><label class="block text-sm font-medium mb-1">Seniority</label><select id="seniority" class="w-full px-3 py-2 border rounded-lg"><option value="">Seleccione...</option><option value="Trainee">Trainee</option><option value="Junior">Junior</option><option value="Semi-Senior">Semi-Senior</option><option value="Senior">Senior</option><option value="Lead">Lead</option></select></div>
                 </div>
-                
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Ubicación</label>
-                        <input type="text" id="ubicacion" placeholder="Remoto, Híbrido, San José..." class="w-full px-3 py-2 border rounded-lg">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Salario oferta</label>
-                        <input type="text" id="salario_oferta" placeholder="$2,000 - $3,500" class="w-full px-3 py-2 border rounded-lg">
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">Ubicación</label><input type="text" id="ubicacion" placeholder="Remoto, Híbrido, San José..." class="w-full px-3 py-2 border rounded-lg"></div>
+                    <div><label class="block text-sm font-medium mb-1">Salario oferta</label><input type="text" id="salario_oferta" placeholder="$2,000 - $3,500" class="w-full px-3 py-2 border rounded-lg"></div>
                 </div>
-                
-                <!-- Responsabilidades -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1">📋 Responsabilidades</label>
-                    <div id="responsabilidades-list" class="space-y-2 mb-2"></div>
-                    <button type="button" onclick="agregarItemLista('responsabilidades')" class="text-blue-600 text-sm hover:underline">+ Agregar responsabilidad</button>
-                </div>
-
-                <!-- Beneficios -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1">🎁 Beneficios</label>
-                    <div id="beneficios-list" class="space-y-2 mb-2"></div>
-                    <button type="button" onclick="agregarItemLista('beneficios')" class="text-blue-600 text-sm hover:underline">+ Agregar beneficio</button>
-                </div>
-
-                <!-- Sobre la empresa -->
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-1">🏢 Sobre la empresa</label>
-                    <textarea id="sobre_empresa" rows="3" class="w-full px-3 py-2 border rounded-lg" placeholder="Describe la empresa, su cultura, valores, misión, etc."></textarea>
-                </div>
-
-                <!-- Horario y contrato -->
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">📋 Responsabilidades</label><div id="responsabilidades-list" class="space-y-2 mb-2"></div><button type="button" onclick="agregarItemLista('responsabilidades')" class="text-blue-600 text-sm hover:underline">+ Agregar responsabilidad</button></div>
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">🎁 Beneficios</label><div id="beneficios-list" class="space-y-2 mb-2"></div><button type="button" onclick="agregarItemLista('beneficios')" class="text-blue-600 text-sm hover:underline">+ Agregar beneficio</button></div>
+                <div class="mb-4"><label class="block text-sm font-medium mb-1">🏢 Sobre la empresa</label><textarea id="sobre_empresa" rows="3" class="w-full px-3 py-2 border rounded-lg"></textarea></div>
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">⏰ Horario</label>
-                        <input type="text" id="horario" placeholder="Lunes a Viernes, 8am-5pm" class="w-full px-3 py-2 border rounded-lg">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1">📄 Tipo de contrato</label>
-                        <select id="tipo_contrato" class="w-full px-3 py-2 border rounded-lg">
-                            <option value="">Seleccione...</option>
-                            <option value="Indefinido">Indefinido</option>
-                            <option value="Temporal">Temporal</option>
-                            <option value="Consultoría">Consultoría</option>
-                            <option value="Pasantía">Pasantía</option>
-                            <option value="Freelance">Freelance</option>
-                        </select>
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">⏰ Horario</label><input type="text" id="horario" placeholder="Lunes a Viernes, 8am-5pm" class="w-full px-3 py-2 border rounded-lg"></div>
+                    <div><label class="block text-sm font-medium mb-1">📄 Tipo de contrato</label><select id="tipo_contrato" class="w-full px-3 py-2 border rounded-lg"><option value="">Seleccione...</option><option value="Indefinido">Indefinido</option><option value="Temporal">Temporal</option><option value="Consultoría">Consultoría</option><option value="Pasantía">Pasantía</option><option value="Freelance">Freelance</option></select></div>
                 </div>
-
-                <!-- Modalidad y vacantes -->
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">🏠 Modalidad</label>
-                        <select id="modalidad" class="w-full px-3 py-2 border rounded-lg">
-                            <option value="">Seleccione...</option>
-                            <option value="Remoto">Remoto</option>
-                            <option value="Híbrido">Híbrido</option>
-                            <option value="Presencial">Presencial</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium mb-1">👥 Vacantes</label>
-                        <input type="number" id="vacantes" value="1" min="1" class="w-full px-3 py-2 border rounded-lg">
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">🏠 Modalidad</label><select id="modalidad" class="w-full px-3 py-2 border rounded-lg"><option value="">Seleccione...</option><option value="Remoto">Remoto</option><option value="Híbrido">Híbrido</option><option value="Presencial">Presencial</option></select></div>
+                    <div><label class="block text-sm font-medium mb-1">👥 Vacantes</label><input type="number" id="vacantes" value="1" min="1" class="w-full px-3 py-2 border rounded-lg"></div>
                 </div>
-
-                <!-- Fecha límite y activo -->
                 <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">📅 Fecha límite</label>
-                        <input type="date" id="fecha_limite" class="w-full px-3 py-2 border rounded-lg">
-                    </div>
-                    <div class="flex items-center">
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" id="activo" checked> Activo
-                        </label>
-                    </div>
+                    <div><label class="block text-sm font-medium mb-1">📅 Fecha límite</label><input type="date" id="fecha_limite" class="w-full px-3 py-2 border rounded-lg"></div>
+                    <div class="flex items-center"><label class="flex items-center gap-2"><input type="checkbox" id="activo" checked> Activo</label></div>
                 </div>
-                
                 <hr class="my-4">
-                
                 <h3 class="font-semibold mb-3">📋 Preguntas adicionales para candidatos</h3>
                 <div id="preguntas-container" class="space-y-3 mb-4"></div>
                 <button type="button" onclick="agregarPregunta()" class="text-blue-600 text-sm hover:underline">+ Agregar pregunta</button>
-                
-                <div class="flex gap-3 mt-6">
-                    <button type="submit" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">Guardar puesto</button>
-                    <button type="button" onclick="cerrarModalPuesto()" class="px-6 py-2 border rounded-lg hover:bg-gray-50 transition">Cancelar</button>
-                </div>
+                <div class="flex gap-3 mt-6"><button type="submit" class="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">Guardar puesto</button><button type="button" onclick="cerrarModalPuesto()" class="px-6 py-2 border rounded-lg hover:bg-gray-50 transition">Cancelar</button></div>
             </form>
         </div>
     </div>
@@ -210,387 +196,170 @@
     let preguntasTemp = [];
     let responsabilidadesTemp = [];
     let beneficiosTemp = [];
+    let todosPuestos = [];
+    let todasPostulaciones = [];
 
-    document.addEventListener('DOMContentLoaded', () => {
-        cargarPuestos();
-    });
+    document.addEventListener('DOMContentLoaded', () => { cargarPuestos(); });
 
-    async function cargarPuestos() {
-        try {
-            const res = await axios.get(`${API_URL}/admin/puestos`);
-            if (res.data.success) {
-                renderizarPuestos(res.data.puestos);
-            }
-        } catch (error) {
-            document.getElementById('puestos-container').innerHTML = `<div class="text-center py-12 text-red-500">❌ Error cargando puestos</div>`;
-        }
+    function escapeHtml(text) { if (!text) return ''; return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+    function mostrarSnackbar(mensaje) { const snackbar = document.createElement('div'); snackbar.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm'; snackbar.textContent = mensaje; document.body.appendChild(snackbar); setTimeout(() => snackbar.remove(), 3000); }
+
+    async function cargarPuestos() { try { const res = await axios.get(`${API_URL}/admin/puestos`); if (res.data.success) { todosPuestos = res.data.puestos; cargarClientesUnicos(); aplicarFiltrosPuestos(); } } catch (error) { document.getElementById('puestos-container').innerHTML = `<div class="text-center py-12 text-red-500">❌ Error cargando puestos</div>`; } }
+
+    function cargarClientesUnicos() { const clientes = [...new Set(todosPuestos.map(p => p.cliente).filter(c => c))]; const selectCliente = document.getElementById('filtro-puesto-cliente'); if (selectCliente) { selectCliente.innerHTML = '<option value="">Todos</option>' + clientes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(''); } }
+
+    function aplicarFiltrosPuestos() {
+        const titulo = document.getElementById('filtro-puesto-titulo')?.value.toLowerCase() || '';
+        const cliente = document.getElementById('filtro-puesto-cliente')?.value || '';
+        const seniority = document.getElementById('filtro-puesto-seniority')?.value || '';
+        const estado = document.getElementById('filtro-puesto-estado')?.value || '';
+        let filtrados = [...todosPuestos];
+        if (titulo) filtrados = filtrados.filter(p => p.titulo.toLowerCase().includes(titulo) || p.cliente.toLowerCase().includes(titulo));
+        if (cliente) filtrados = filtrados.filter(p => p.cliente === cliente);
+        if (seniority) filtrados = filtrados.filter(p => p.seniority === seniority);
+        if (estado === 'activo') filtrados = filtrados.filter(p => p.activo === true);
+        if (estado === 'inactivo') filtrados = filtrados.filter(p => p.activo === false);
+        renderizarPuestos(filtrados);
     }
+
+    function limpiarFiltrosPuestos() { document.getElementById('filtro-puesto-titulo').value = ''; document.getElementById('filtro-puesto-cliente').value = ''; document.getElementById('filtro-puesto-seniority').value = ''; document.getElementById('filtro-puesto-estado').value = ''; aplicarFiltrosPuestos(); }
 
     function renderizarPuestos(puestos) {
         const container = document.getElementById('puestos-container');
-        if (!puestos || puestos.length === 0) {
-            container.innerHTML = `<div class="text-center py-12 text-gray-500">📭 No hay puestos creados. Haz clic en "Nuevo Puesto"</div>`;
-            return;
-        }
-        
-        container.innerHTML = `
-            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                ${puestos.map(p => `
-                    <div class="bg-white rounded-xl shadow-md hover:shadow-lg transition p-5 border-l-4 ${p.activo ? 'border-green-500' : 'border-gray-400'}">
-                        <div class="flex justify-between items-start mb-3">
-                            <div>
-                                <span class="text-xs ${p.activo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'} px-2 py-1 rounded">${p.cliente}</span>
-                                <h3 class="text-lg font-bold mt-2">${p.titulo}</h3>
-                            </div>
-                            <div class="flex gap-2">
-                                <button onclick="editarPuesto(${p.id})" class="text-blue-600 hover:text-blue-800">✏️</button>
-                                <button onclick="eliminarPuesto(${p.id})" class="text-red-600 hover:text-red-800">🗑️</button>
-                            </div>
-                        </div>
-                        <p class="text-gray-600 text-sm mb-3 line-clamp-2">${p.descripcion?.substring(0, 100) || 'Sin descripción'}...</p>
-                        <div class="flex flex-wrap gap-1 mb-3">
-                            ${(p.habilidades_requeridas || []).slice(0, 3).map(h => `<span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">${h}</span>`).join('')}
-                            ${(p.habilidades_requeridas || []).length > 3 ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">+${p.habilidades_requeridas.length - 3}</span>` : ''}
-                        </div>
-                        <div class="flex justify-between items-center text-xs text-gray-500">
-                            <span>📍 ${p.ubicacion || 'No especificada'}</span>
-                            <span>${p.seniority || 'N/A'}</span>
-                        </div>
-                        <div class="mt-3 pt-3 border-t flex justify-between items-center">
-                            <span class="text-xs ${p.activo ? 'text-green-600' : 'text-gray-500'}">${p.activo ? '✅ Activo' : '⏸️ Inactivo'}</span>
-                            <button onclick="editarPreguntas(${p.id})" class="text-purple-600 text-sm hover:underline">📝 Configurar</button>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        if (!puestos || puestos.length === 0) { container.innerHTML = `<div class="text-center py-12 text-gray-500">📭 No hay puestos creados. Haz clic en "Nuevo Puesto"</div>`; return; }
+        container.innerHTML = `<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">${puestos.map(p => `<div class="bg-white rounded-xl shadow-md hover:shadow-lg transition p-5 border-l-4 ${p.activo ? 'border-green-500' : 'border-gray-400'}"><div class="flex justify-between items-start mb-3"><div><span class="text-xs ${p.activo ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'} px-2 py-1 rounded">${escapeHtml(p.cliente)}</span><h3 class="text-lg font-bold mt-2">${escapeHtml(p.titulo)}</h3></div><div class="flex gap-2"><button onclick="editarPuesto(${p.id})" class="text-blue-600 hover:text-blue-800">✏️</button><button onclick="eliminarPuesto(${p.id})" class="text-red-600 hover:text-red-800">🗑️</button></div></div><p class="text-gray-600 text-sm mb-3 line-clamp-2">${escapeHtml(p.descripcion?.substring(0, 100) || 'Sin descripción')}...</p><div class="flex flex-wrap gap-1 mb-3">${(p.habilidades_requeridas || []).slice(0, 3).map(h => `<span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">${escapeHtml(h)}</span>`).join('')}${(p.habilidades_requeridas || []).length > 3 ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">+${p.habilidades_requeridas.length - 3}</span>` : ''}</div><div class="flex justify-between items-center text-xs text-gray-500"><span>📍 ${escapeHtml(p.ubicacion || 'No especificada')}</span><span>${escapeHtml(p.seniority || 'N/A')}</span></div><div class="mt-3 pt-3 border-t flex justify-between items-center"><span class="text-xs ${p.activo ? 'text-green-600' : 'text-gray-500'}">${p.activo ? '✅ Activo' : '⏸️ Inactivo'}</span><div class="flex gap-2"><button onclick="verPostulacionesPorPuesto(${p.id}, '${escapeHtml(p.titulo).replace(/'/g, "\\'")}')" class="text-blue-600 text-sm hover:underline">📋 Postulaciones</button><button onclick="editarPreguntas(${p.id})" class="text-purple-600 text-sm hover:underline">📝 Configurar</button></div></div></div>`).join('')}</div>`;
     }
 
-    // Funciones para listas dinámicas (responsabilidades y beneficios)
-    function agregarItemLista(tipo) {
-        if (tipo === 'responsabilidades') {
-            responsabilidadesTemp.push('');
-            renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad');
-        } else if (tipo === 'beneficios') {
-            beneficiosTemp.push('');
-            renderizarLista('beneficios', beneficiosTemp, 'Beneficio');
-        }
-    }
+    // Funciones de listas dinámicas
+    function agregarItemLista(tipo) { if (tipo === 'responsabilidades') { responsabilidadesTemp.push(''); renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad'); } else if (tipo === 'beneficios') { beneficiosTemp.push(''); renderizarLista('beneficios', beneficiosTemp, 'Beneficio'); } }
+    function renderizarLista(tipo, lista, placeholder) { const container = document.getElementById(`${tipo}-list`); if (lista.length === 0) { container.innerHTML = '<p class="text-gray-400 text-sm">No hay elementos agregados.</p>'; return; } container.innerHTML = lista.map((item, idx) => `<div class="flex gap-2"><input type="text" value="${escapeHtml(item)}" placeholder="${placeholder} ${idx + 1}" onchange="actualizarItemLista('${tipo}', ${idx}, this.value)" class="flex-1 px-3 py-2 border rounded-lg text-sm"><button type="button" onclick="eliminarItemLista('${tipo}', ${idx})" class="text-red-500 hover:text-red-700 px-3">&times;</button></div>`).join(''); }
+    function actualizarItemLista(tipo, idx, valor) { if (tipo === 'responsabilidades') responsabilidadesTemp[idx] = valor; if (tipo === 'beneficios') beneficiosTemp[idx] = valor; }
+    function eliminarItemLista(tipo, idx) { if (tipo === 'responsabilidades') responsabilidadesTemp.splice(idx, 1); if (tipo === 'beneficios') beneficiosTemp.splice(idx, 1); renderizarLista(tipo, tipo === 'responsabilidades' ? responsabilidadesTemp : beneficiosTemp, tipo === 'responsabilidades' ? 'Responsabilidad' : 'Beneficio'); }
 
-    function renderizarLista(tipo, lista, placeholder) {
-        const container = document.getElementById(`${tipo}-list`);
-        if (lista.length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-sm">No hay elementos agregados.</p>';
-            return;
-        }
-        container.innerHTML = lista.map((item, idx) => `
-            <div class="flex gap-2">
-                <input type="text" value="${item.replace(/"/g, '&quot;')}" placeholder="${placeholder} ${idx + 1}"
-                       onchange="actualizarItemLista('${tipo}', ${idx}, this.value)"
-                       class="flex-1 px-3 py-2 border rounded-lg text-sm">
-                <button type="button" onclick="eliminarItemLista('${tipo}', ${idx})" class="text-red-500 hover:text-red-700 px-3">&times;</button>
-            </div>
-        `).join('');
-    }
-
-    function actualizarItemLista(tipo, idx, valor) {
-        if (tipo === 'responsabilidades') responsabilidadesTemp[idx] = valor;
-        if (tipo === 'beneficios') beneficiosTemp[idx] = valor;
-    }
-
-    function eliminarItemLista(tipo, idx) {
-        if (tipo === 'responsabilidades') responsabilidadesTemp.splice(idx, 1);
-        if (tipo === 'beneficios') beneficiosTemp.splice(idx, 1);
-        renderizarLista(tipo, tipo === 'responsabilidades' ? responsabilidadesTemp : beneficiosTemp, 
-                        tipo === 'responsabilidades' ? 'Responsabilidad' : 'Beneficio');
-    }
-
-    async function editarPuesto(id) {
-        try {
-            const res = await axios.get(`${API_URL}/admin/puestos`);
-            const puesto = res.data.puestos.find(p => p.id === id);
-            if (puesto) {
-                document.getElementById('modal-puesto-titulo').innerText = '✏️ Editar Puesto';
-                document.getElementById('puesto-id').value = puesto.id;
-                document.getElementById('cliente').value = puesto.cliente;
-                document.getElementById('titulo').value = puesto.titulo;
-                document.getElementById('descripcion').value = puesto.descripcion || '';
-                document.getElementById('requisitos').value = puesto.requisitos || '';
-                document.getElementById('habilidades').value = (puesto.habilidades_requeridas || []).join(', ');
-                document.getElementById('seniority').value = puesto.seniority || '';
-                document.getElementById('ubicacion').value = puesto.ubicacion || '';
-                document.getElementById('salario_oferta').value = puesto.salario_oferta || '';
-                document.getElementById('activo').checked = puesto.activo;
-                
-                // Cargar campos estructurados
-                document.getElementById('sobre_empresa').value = puesto.sobre_empresa || '';
-                document.getElementById('horario').value = puesto.horario || '';
-                document.getElementById('tipo_contrato').value = puesto.tipo_contrato || '';
-                document.getElementById('modalidad').value = puesto.modalidad || '';
-                document.getElementById('vacantes').value = puesto.vacantes || 1;
-                document.getElementById('fecha_limite').value = puesto.fecha_limite || '';
-                
-                responsabilidadesTemp = puesto.responsabilidades || [];
-                beneficiosTemp = puesto.beneficios || [];
-                renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad');
-                renderizarLista('beneficios', beneficiosTemp, 'Beneficio');
-                
-                // Cargar preguntas existentes
-                const pregRes = await axios.get(`${API_URL}/admin/puesto/${id}/preguntas`);
-                preguntasTemp = pregRes.data.preguntas || [];
-                renderizarPreguntas();
-                
-                document.getElementById('modal-puesto').classList.remove('hidden');
-                document.getElementById('modal-puesto').classList.add('flex');
-            }
-        } catch (error) {
-            alert('Error cargando puesto');
-        }
-    }
-
-    function abrirModalPuesto() {
-        document.getElementById('modal-puesto-titulo').innerText = '➕ Nuevo Puesto';
-        document.getElementById('form-puesto').reset();
-        document.getElementById('puesto-id').value = '';
-        document.getElementById('activo').checked = true;
-        document.getElementById('vacantes').value = 1;
-        
-        responsabilidadesTemp = [];
-        beneficiosTemp = [];
-        preguntasTemp = [];
-        
-        renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad');
-        renderizarLista('beneficios', beneficiosTemp, 'Beneficio');
-        renderizarPreguntas();
-        
-        document.getElementById('modal-puesto').classList.remove('hidden');
-        document.getElementById('modal-puesto').classList.add('flex');
-    }
-
-    function renderizarPreguntas() {
-        const container = document.getElementById('preguntas-container');
-        if (preguntasTemp.length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-sm">No hay preguntas adicionales configuradas.</p>';
-            return;
-        }
-        container.innerHTML = preguntasTemp.map((p, idx) => `
-            <div class="bg-gray-50 p-3 rounded-lg border">
-                <div class="flex justify-between mb-2">
-                    <input type="text" placeholder="Pregunta" value="${p.pregunta.replace(/"/g, '&quot;')}" 
-                           onchange="preguntasTemp[${idx}].pregunta = this.value" class="flex-1 px-2 py-1 border rounded">
-                    <button onclick="eliminarPregunta(${idx})" class="text-red-500 ml-2">🗑️</button>
-                </div>
-                <div class="flex gap-2">
-                    <select onchange="preguntasTemp[${idx}].tipo = this.value" class="px-2 py-1 border rounded text-sm">
-                        <option value="texto" ${p.tipo === 'texto' ? 'selected' : ''}>Texto</option>
-                        <option value="number" ${p.tipo === 'number' ? 'selected' : ''}>Número</option>
-                        <option value="select" ${p.tipo === 'select' ? 'selected' : ''}>Select</option>
-                    </select>
-                    <input type="text" placeholder="Opciones (separadas por coma)" value="${(p.opciones || []).join(', ')}" 
-                           onchange="preguntasTemp[${idx}].opciones = this.value.split(',').map(s => s.trim())" class="flex-1 px-2 py-1 border rounded text-sm">
-                    <label class="flex items-center gap-1 text-sm">
-                        <input type="checkbox" ${p.requerido ? 'checked' : ''} onchange="preguntasTemp[${idx}].requerido = this.checked"> Requerido
-                    </label>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    function agregarPregunta() {
-        preguntasTemp.push({ pregunta: '', tipo: 'texto', opciones: [], requerido: true, orden: preguntasTemp.length });
-        renderizarPreguntas();
-    }
-
-    function eliminarPregunta(idx) {
-        preguntasTemp.splice(idx, 1);
-        renderizarPreguntas();
-    }
-
-    async function eliminarPuesto(id) {
-        if (!confirm('¿Eliminar este puesto? Se eliminarán también las postulaciones asociadas.')) return;
-        try {
-            await axios.delete(`${API_URL}/admin/puesto/${id}`);
-            cargarPuestos();
-        } catch (error) {
-            alert('Error eliminando puesto');
-        }
-    }
-
-    document.getElementById('form-puesto').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const habilidades = document.getElementById('habilidades').value.split(',').map(s => s.trim()).filter(s => s);
-        
-        const puestoData = {
-            id: document.getElementById('puesto-id').value || null,
-            cliente: document.getElementById('cliente').value,
-            titulo: document.getElementById('titulo').value,
-            descripcion: document.getElementById('descripcion').value,
-            requisitos: document.getElementById('requisitos').value,
-            habilidades_requeridas: habilidades,
-            seniority: document.getElementById('seniority').value,
-            ubicacion: document.getElementById('ubicacion').value,
-            salario_oferta: document.getElementById('salario_oferta').value,
-            activo: document.getElementById('activo').checked,
-            responsabilidades: responsabilidadesTemp,
-            beneficios: beneficiosTemp,
-            sobre_empresa: document.getElementById('sobre_empresa').value,
-            horario: document.getElementById('horario').value,
-            tipo_contrato: document.getElementById('tipo_contrato').value,
-            modalidad: document.getElementById('modalidad').value,
-            vacantes: parseInt(document.getElementById('vacantes').value) || 1,
-            fecha_limite: document.getElementById('fecha_limite').value || null
-        };
-        
-        try {
-            const res = await axios.post(`${API_URL}/admin/puesto`, puestoData);
-            if (res.data.success) {
-                const puestoId = res.data.id;
-                
-                const preguntasData = preguntasTemp.map((p, idx) => ({ ...p, orden: idx }));
-                await axios.post(`${API_URL}/admin/puesto/preguntas`, {
-                    puesto_id: puestoId,
-                    preguntas: preguntasData
-                });
-                
-                cerrarModalPuesto();
-                cargarPuestos();
-                alert('Puesto guardado exitosamente');
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            alert('Error guardando puesto: ' + (error.response?.data?.error || error.message));
-        }
-    });
-
-    async function editarPreguntas(puestoId) {
-        await editarPuesto(puestoId);
-    }
+    async function editarPuesto(id) { try { const puesto = todosPuestos.find(p => p.id === id); if (puesto) { document.getElementById('modal-puesto-titulo').innerText = '✏️ Editar Puesto'; document.getElementById('puesto-id').value = puesto.id; document.getElementById('cliente').value = puesto.cliente; document.getElementById('titulo').value = puesto.titulo; document.getElementById('descripcion').value = puesto.descripcion || ''; document.getElementById('requisitos').value = puesto.requisitos || ''; document.getElementById('habilidades').value = (puesto.habilidades_requeridas || []).join(', '); document.getElementById('seniority').value = puesto.seniority || ''; document.getElementById('ubicacion').value = puesto.ubicacion || ''; document.getElementById('salario_oferta').value = puesto.salario_oferta || ''; document.getElementById('activo').checked = puesto.activo; document.getElementById('sobre_empresa').value = puesto.sobre_empresa || ''; document.getElementById('horario').value = puesto.horario || ''; document.getElementById('tipo_contrato').value = puesto.tipo_contrato || ''; document.getElementById('modalidad').value = puesto.modalidad || ''; document.getElementById('vacantes').value = puesto.vacantes || 1; document.getElementById('fecha_limite').value = puesto.fecha_limite || ''; responsabilidadesTemp = puesto.responsabilidades || []; beneficiosTemp = puesto.beneficios || []; renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad'); renderizarLista('beneficios', beneficiosTemp, 'Beneficio'); const pregRes = await axios.get(`${API_URL}/admin/puesto/${id}/preguntas`); preguntasTemp = pregRes.data.preguntas || []; renderizarPreguntas(); document.getElementById('modal-puesto').classList.remove('hidden'); document.getElementById('modal-puesto').classList.add('flex'); } } catch (error) { alert('Error cargando puesto'); } }
+    function abrirModalPuesto() { document.getElementById('modal-puesto-titulo').innerText = '➕ Nuevo Puesto'; document.getElementById('form-puesto').reset(); document.getElementById('puesto-id').value = ''; document.getElementById('activo').checked = true; document.getElementById('vacantes').value = 1; responsabilidadesTemp = []; beneficiosTemp = []; preguntasTemp = []; renderizarLista('responsabilidades', responsabilidadesTemp, 'Responsabilidad'); renderizarLista('beneficios', beneficiosTemp, 'Beneficio'); renderizarPreguntas(); document.getElementById('modal-puesto').classList.remove('hidden'); document.getElementById('modal-puesto').classList.add('flex'); }
+    function renderizarPreguntas() { const container = document.getElementById('preguntas-container'); if (preguntasTemp.length === 0) { container.innerHTML = '<p class="text-gray-400 text-sm">No hay preguntas adicionales configuradas.</p>'; return; } container.innerHTML = preguntasTemp.map((p, idx) => `<div class="bg-gray-50 p-3 rounded-lg border"><div class="flex justify-between mb-2"><input type="text" placeholder="Pregunta" value="${escapeHtml(p.pregunta)}" onchange="preguntasTemp[${idx}].pregunta = this.value" class="flex-1 px-2 py-1 border rounded"><button onclick="eliminarPregunta(${idx})" class="text-red-500 ml-2">🗑️</button></div><div class="flex gap-2"><select onchange="preguntasTemp[${idx}].tipo = this.value" class="px-2 py-1 border rounded text-sm"><option value="texto" ${p.tipo === 'texto' ? 'selected' : ''}>Texto</option><option value="number" ${p.tipo === 'number' ? 'selected' : ''}>Número</option><option value="select" ${p.tipo === 'select' ? 'selected' : ''}>Select</option></select><input type="text" placeholder="Opciones (separadas por coma)" value="${(p.opciones || []).join(', ')}" onchange="preguntasTemp[${idx}].opciones = this.value.split(',').map(s => s.trim())" class="flex-1 px-2 py-1 border rounded text-sm"><label class="flex items-center gap-1 text-sm"><input type="checkbox" ${p.requerido ? 'checked' : ''} onchange="preguntasTemp[${idx}].requerido = this.checked"> Requerido</label></div></div>`).join(''); }
+    function agregarPregunta() { preguntasTemp.push({ pregunta: '', tipo: 'texto', opciones: [], requerido: true, orden: preguntasTemp.length }); renderizarPreguntas(); }
+    function eliminarPregunta(idx) { preguntasTemp.splice(idx, 1); renderizarPreguntas(); }
+    async function eliminarPuesto(id) { if (!confirm('¿Eliminar este puesto? Se eliminarán también las postulaciones asociadas.')) return; try { await axios.delete(`${API_URL}/admin/puesto/${id}`); cargarPuestos(); } catch (error) { alert('Error eliminando puesto'); } }
+    document.getElementById('form-puesto').addEventListener('submit', async (e) => { e.preventDefault(); const habilidades = document.getElementById('habilidades').value.split(',').map(s => s.trim()).filter(s => s); const puestoData = { id: document.getElementById('puesto-id').value || null, cliente: document.getElementById('cliente').value, titulo: document.getElementById('titulo').value, descripcion: document.getElementById('descripcion').value, requisitos: document.getElementById('requisitos').value, habilidades_requeridas: habilidades, seniority: document.getElementById('seniority').value, ubicacion: document.getElementById('ubicacion').value, salario_oferta: document.getElementById('salario_oferta').value, activo: document.getElementById('activo').checked, responsabilidades: responsabilidadesTemp, beneficios: beneficiosTemp, sobre_empresa: document.getElementById('sobre_empresa').value, horario: document.getElementById('horario').value, tipo_contrato: document.getElementById('tipo_contrato').value, modalidad: document.getElementById('modalidad').value, vacantes: parseInt(document.getElementById('vacantes').value) || 1, fecha_limite: document.getElementById('fecha_limite').value || null }; try { const res = await axios.post(`${API_URL}/admin/puesto`, puestoData); if (res.data.success) { const puestoId = res.data.id; const preguntasData = preguntasTemp.map((p, idx) => ({ ...p, orden: idx })); await axios.post(`${API_URL}/admin/puesto/preguntas`, { puesto_id: puestoId, preguntas: preguntasData }); cerrarModalPuesto(); cargarPuestos(); alert('Puesto guardado exitosamente'); } } catch (error) { console.error('Error:', error); alert('Error guardando puesto: ' + (error.response?.data?.error || error.message)); } });
+    async function editarPreguntas(puestoId) { await editarPuesto(puestoId); }
 
     // Postulaciones
-    async function cargarPostulaciones() {
-        try {
-            const res = await axios.get(`${API_URL}/admin/postulaciones`);
-            if (res.data.success) {
-                renderizarPostulaciones(res.data.postulaciones);
-            }
-        } catch (error) {
-            document.getElementById('postulaciones-list').innerHTML = `<div class="text-center py-8 text-red-500">❌ Error cargando postulaciones</div>`;
-        }
+    async function cargarPostulaciones() { try { const res = await axios.get(`${API_URL}/admin/postulaciones`); if (res.data.success) { todasPostulaciones = res.data.postulaciones; cargarClientesPostulaciones(); aplicarFiltrosPostulaciones(); } else { document.getElementById('postulaciones-list').innerHTML = `<div class="text-center py-8 text-red-500">❌ ${res.data.error || 'Error cargando postulaciones'}</div>`; } } catch (error) { document.getElementById('postulaciones-list').innerHTML = `<div class="text-center py-8 text-red-500">❌ Error cargando postulaciones</div>`; } }
+
+    function cargarClientesPostulaciones() { const clientes = [...new Set(todasPostulaciones.map(p => p.puesto_cliente).filter(c => c))]; const selectCliente = document.getElementById('filtro-postulacion-cliente'); if (selectCliente) { selectCliente.innerHTML = '<option value="">Todos</option>' + clientes.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(''); } }
+
+    function aplicarFiltrosPostulaciones() {
+        let filtrados = [...todasPostulaciones];
+        const candidato = document.getElementById('filtro-postulacion-candidato')?.value.toLowerCase() || '';
+        const cliente = document.getElementById('filtro-postulacion-cliente')?.value || '';
+        const estado = document.getElementById('filtro-postulacion-estado')?.value || '';
+        const scoreMin = parseInt(document.getElementById('filtro-postulacion-score')?.value) || 0;
+        const fechaDesde = document.getElementById('filtro-postulacion-fecha')?.value || '';
+        if (candidato) filtrados = filtrados.filter(p => p.candidato_nombre?.toLowerCase().includes(candidato) || p.candidato_email?.toLowerCase().includes(candidato));
+        if (cliente) filtrados = filtrados.filter(p => p.puesto_cliente === cliente);
+        if (estado) filtrados = filtrados.filter(p => p.estado === estado);
+        if (scoreMin > 0) filtrados = filtrados.filter(p => (p.match_score || 0) >= scoreMin);
+        if (fechaDesde) filtrados = filtrados.filter(p => new Date(p.fecha_postulacion) >= new Date(fechaDesde));
+        document.getElementById('postulaciones-count').innerText = `${filtrados.length} postulaciones`;
+        renderizarPostulaciones(filtrados);
     }
+
+    function limpiarFiltrosPostulaciones() { document.getElementById('filtro-postulacion-candidato').value = ''; document.getElementById('filtro-postulacion-cliente').value = ''; document.getElementById('filtro-postulacion-estado').value = ''; document.getElementById('filtro-postulacion-score').value = ''; document.getElementById('filtro-postulacion-fecha').value = ''; aplicarFiltrosPostulaciones(); }
 
     function renderizarPostulaciones(postulaciones) {
         const container = document.getElementById('postulaciones-list');
-        if (!postulaciones || postulaciones.length === 0) {
-            container.innerHTML = `<div class="text-center py-8 text-gray-500">📭 No hay postulaciones recibidas</div>`;
-            return;
-        }
-        
-        container.innerHTML = postulaciones.map(p => `
-            <div class="border rounded-lg p-4 hover:shadow-md transition">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h3 class="font-bold">${p.candidato_nombre}</h3>
-                        <p class="text-sm text-gray-600">${p.candidato_email}</p>
-                        <p class="text-sm text-gray-600">${p.candidato_telefono}</p>
-                        <p class="text-xs text-gray-400 mt-1">Postulado: ${new Date(p.fecha_postulacion).toLocaleDateString()}</p>
-                    </div>
-                    <div class="text-right">
-                        <select onchange="actualizarEstado(${p.id}, this.value)" class="px-2 py-1 rounded text-sm border ${p.estado === 'pendiente' ? 'bg-yellow-100' : p.estado === 'revisado' ? 'bg-green-100' : 'bg-gray-100'}">
-                            <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>⏳ Pendiente</option>
-                            <option value="revisado" ${p.estado === 'revisado' ? 'selected' : ''}>📊 Revisado</option>
-                            <option value="contacto" ${p.estado === 'contacto' ? 'selected' : ''}>📞 En contacto</option>
-                            <option value="rechazado" ${p.estado === 'rechazado' ? 'selected' : ''}>❌ Rechazado</option>
-                        </select>
-                        <div class="mt-2">
-                            <span class="text-2xl font-bold ${p.match_score >= 70 ? 'text-green-600' : p.match_score >= 50 ? 'text-yellow-600' : 'text-red-600'}">${p.match_score || 0}%</span>
-                            <span class="text-xs text-gray-500">match</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="mt-3 pt-3 border-t flex gap-2">
-                    <button onclick="verDetallePostulacion(${p.id})" class="text-blue-600 text-sm">📋 Ver detalles</button>
-                    <button onclick="verCV('${p.cv_filename}')" class="text-green-600 text-sm">📄 Ver CV</button>
-                </div>
-            </div>
-        `).join('');
+        if (!postulaciones || postulaciones.length === 0) { container.innerHTML = `<div class="text-center py-8 text-gray-500">📭 No hay postulaciones recibidas</div>`; return; }
+        container.innerHTML = postulaciones.map(p => { const tieneAnalisis = p.match_analisis && Object.keys(p.match_analisis || {}).length > 0; const score = p.match_score || 0; const scoreColor = score >= 70 ? 'text-green-600' : score >= 50 ? 'text-yellow-600' : 'text-red-600'; return `<div class="border rounded-lg p-4 hover:shadow-md transition"><div class="flex justify-between items-start"><div><h3 class="font-bold">${escapeHtml(p.candidato_nombre)}</h3><p class="text-sm text-gray-600">${escapeHtml(p.candidato_email)}</p><p class="text-sm text-gray-600">${escapeHtml(p.candidato_telefono)}</p><p class="text-xs text-gray-400 mt-1">Postulado: ${new Date(p.fecha_postulacion).toLocaleDateString()}</p><p class="text-xs text-gray-500 mt-1">Puesto: ${escapeHtml(p.puesto_titulo)} (${escapeHtml(p.puesto_cliente)})</p></div><div class="text-right"><select onchange="actualizarEstado(${p.id}, this.value)" class="px-2 py-1 rounded text-sm border ${p.estado === 'pendiente' ? 'bg-yellow-100' : p.estado === 'revisado' ? 'bg-green-100' : 'bg-gray-100'}"><option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>⏳ Pendiente</option><option value="revisado" ${p.estado === 'revisado' ? 'selected' : ''}>📊 Revisado</option><option value="contacto" ${p.estado === 'contacto' ? 'selected' : ''}>📞 En contacto</option><option value="entrevista" ${p.estado === 'entrevista' ? 'selected' : ''}>🎥 Entrevista</option><option value="rechazado" ${p.estado === 'rechazado' ? 'selected' : ''}>❌ Rechazado</option><option value="contratado" ${p.estado === 'contratado' ? 'selected' : ''}>✅ Contratado</option></select><div class="mt-2">${tieneAnalisis ? `<span class="text-2xl font-bold ${scoreColor}">${score}%</span><span class="text-xs text-gray-500"> match</span>` : `<span class="text-xs text-gray-400">⏳ Analizando...</span>`}</div></div></div><div class="mt-3 pt-3 border-t flex gap-2"><button onclick="verDetallePostulacion(${p.id})" class="text-blue-600 text-sm">📋 Ver detalles</button><button onclick="verCV('${p.cv_filename}')" class="text-green-600 text-sm">📄 Ver CV</button></div></div>`; }).join('');
     }
 
-    async function actualizarEstado(postulacionId, estado) {
-        try {
-            await axios.post(`${API_URL}/admin/postulacion/estado`, { postulacion_id: postulacionId, estado });
-        } catch (error) {
-            alert('Error actualizando estado');
-        }
-    }
+    async function actualizarEstado(postulacionId, estado) { try { await axios.post(`${API_URL}/admin/postulacion/estado`, { postulacion_id: postulacionId, estado }); mostrarSnackbar('✅ Estado actualizado'); cargarPostulaciones(); } catch (error) { mostrarSnackbar('❌ Error actualizando estado'); } }
 
-    async function verDetallePostulacion(postulacionId) {
-        try {
-            const res = await axios.get(`${API_URL}/admin/postulaciones`);
-            const postulacion = res.data.postulaciones?.find(p => p.id === postulacionId);
-            if (postulacion) {
-                const respuestasHtml = Object.entries(postulacion.respuestas || {}).map(([key, value]) => `
-                    <div class="bg-gray-50 p-2 rounded mb-2">
-                        <strong>Pregunta ${key}:</strong> ${value}
-                    </div>
-                `).join('');
-                
-                document.getElementById('detalle-postulacion').innerHTML = `
-                    <h3 class="font-bold text-lg mb-2">${postulacion.candidato_nombre}</h3>
-                    <p><strong>Email:</strong> ${postulacion.candidato_email}</p>
-                    <p><strong>Teléfono:</strong> ${postulacion.candidato_telefono}</p>
-                    <p><strong>Puesto:</strong> ${postulacion.puesto_titulo} (${postulacion.puesto_cliente})</p>
-                    <p><strong>Fecha:</strong> ${new Date(postulacion.fecha_postulacion).toLocaleString()}</p>
-                    <p><strong>Match Score:</strong> <span class="text-2xl font-bold ${postulacion.match_score >= 70 ? 'text-green-600' : postulacion.match_score >= 50 ? 'text-yellow-600' : 'text-red-600'}">${postulacion.match_score || 0}%</span></p>
-                    <hr class="my-3">
-                    <h4 class="font-semibold mb-2">📝 Respuestas del candidato:</h4>
-                    ${respuestasHtml || '<p>No hay respuestas adicionales</p>'}
-                `;
-                document.getElementById('modal-postulacion').classList.remove('hidden');
-                document.getElementById('modal-postulacion').classList.add('flex');
-            }
-        } catch (error) {
-            alert('Error cargando detalles');
-        }
-    }
+    async function verDetallePostulacion(postulacionId) { try { const res = await axios.get(`${API_URL}/admin/postulaciones`); const postulacion = res.data.postulaciones?.find(p => p.id === postulacionId); if (postulacion) { const respuestasHtml = Object.entries(postulacion.respuestas || {}).map(([key, value]) => `<div class="bg-gray-50 p-2 rounded mb-2"><strong>Pregunta ${key}:</strong> ${escapeHtml(value)}</div>`).join(''); const score = postulacion.match_score || 0; const scoreColor = score >= 70 ? 'text-green-600' : score >= 50 ? 'text-yellow-600' : 'text-red-600'; const tieneAnalisis = postulacion.match_analisis && Object.keys(postulacion.match_analisis || {}).length > 0; const analisis = postulacion.match_analisis || {}; let analisisHtml = ''; if (tieneAnalisis) { analisisHtml = `<div class="bg-white border rounded-lg p-4 shadow-sm mb-4"><div class="flex justify-between items-center mb-3 pb-2 border-b"><h4 class="font-bold text-lg">🤖 Evaluación IA</h4><span class="text-2xl font-bold ${scoreColor}">${score}/100</span></div><div class="mb-3 p-3 bg-gray-50 rounded-lg"><p class="text-sm text-gray-700">${escapeHtml(analisis.resumen || 'No disponible')}</p></div><div class="grid grid-cols-2 gap-3 mb-3"><div class="bg-green-50 p-3 rounded-lg"><h5 class="font-semibold text-green-700 mb-2">✅ Fortalezas</h5><ul class="list-disc pl-4 text-sm">${(analisis.fortalezas || []).map(f => `<li>${escapeHtml(f)}</li>`).join('') || '<li>No especificadas</li>'}</ul></div><div class="bg-orange-50 p-3 rounded-lg"><h5 class="font-semibold text-orange-700 mb-2">📈 Áreas de mejora</h5><ul class="list-disc pl-4 text-sm">${(analisis.debilidades || []).map(d => `<li>${escapeHtml(d)}</li>`).join('') || '<li>No especificadas</li>'}</ul></div></div><div class="grid grid-cols-2 gap-3 mb-3"><div class="bg-blue-50 p-3 rounded-lg"><h5 class="font-semibold text-blue-700 mb-2">⚡ Habilidades coincidentes</h5><div class="flex flex-wrap gap-1">${(analisis.habilidades_coincidentes || []).map(h => `<span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs">${escapeHtml(h)}</span>`).join('') || '<span class="text-gray-500 text-sm">Ninguna</span>'}</div></div><div class="bg-red-50 p-3 rounded-lg"><h5 class="font-semibold text-red-700 mb-2">⚠️ Habilidades faltantes</h5><div class="flex flex-wrap gap-1">${(analisis.habilidades_faltantes || []).map(h => `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full text-xs">${escapeHtml(h)}</span>`).join('') || '<span class="text-gray-500 text-sm">Ninguna</span>'}</div></div></div><div class="mb-3"><h5 class="font-semibold mb-1">📊 Análisis de experiencia</h5><p class="text-sm text-gray-600">${escapeHtml(analisis.analisis_experiencia || 'No disponible')}</p></div><div class="mb-3"><h5 class="font-semibold mb-1">🎓 Análisis de formación</h5><p class="text-sm text-gray-600">${escapeHtml(analisis.analisis_formacion || 'No disponible')}</p></div><div class="mt-3 pt-3 border-t"><div class="flex justify-between items-center"><div><span class="text-sm text-gray-500">Recomendación</span><div class="font-semibold ${analisis.recomendacion === 'avanzar' ? 'text-green-600' : analisis.recomendacion === 'entrevistar' ? 'text-blue-600' : 'text-red-600'}">${analisis.recomendacion === 'avanzar' ? '✅ Avanzar a siguiente fase' : analisis.recomendacion === 'entrevistar' ? '📞 Programar entrevista' : '❌ Descartar'}</div></div><div class="text-right"><span class="text-sm text-gray-500">Confianza del análisis</span><div class="font-semibold">${escapeHtml(analisis.confiabilidad || 'Media')}</div></div></div><p class="text-sm text-gray-600 mt-2">${escapeHtml(analisis.justificacion || 'No disponible')}</p></div></div>`; } else { analisisHtml = `<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 text-center"><span class="text-yellow-700">⏳ Analizando postulación en segundo plano... El análisis estará disponible pronto.</span></div>`; } document.getElementById('detalle-postulacion').innerHTML = `<div class="flex gap-3 mb-4 pb-3 border-b"><button onclick="verFichaCandidato(${postulacion.candidato_id})" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">📋 Ver ficha completa</button></div>${analisisHtml}<div class="bg-gray-50 rounded-lg p-4 mb-4"><h3 class="font-bold text-lg mb-2">${escapeHtml(postulacion.candidato_nombre)}</h3><div class="grid grid-cols-2 gap-2 text-sm"><p><strong>Email:</strong> ${escapeHtml(postulacion.candidato_email)}</p><p><strong>Teléfono:</strong> ${escapeHtml(postulacion.candidato_telefono)}</p><p><strong>Puesto:</strong> ${escapeHtml(postulacion.puesto_titulo)} (${escapeHtml(postulacion.puesto_cliente)})</p><p><strong>Fecha:</strong> ${new Date(postulacion.fecha_postulacion).toLocaleString()}</p></div><div class="mt-3 pt-2 border-t"><p><strong>Match Score:</strong> <span class="text-2xl font-bold ${scoreColor}">${score}%</span></p></div></div><h4 class="font-semibold mb-2">📝 Respuestas del candidato:</h4><div class="max-h-60 overflow-y-auto">${respuestasHtml || '<p class="text-gray-500">No hay respuestas adicionales</p>'}</div>`; document.getElementById('modal-postulacion').classList.remove('hidden'); document.getElementById('modal-postulacion').classList.add('flex'); } } catch (error) { console.error('Error:', error); alert('Error cargando detalles'); } }
 
-    function verCV(filename) {
-        if (filename) {
-            window.open(`${API_URL}/view-cv/${filename}`, '_blank');
-        } else {
-            alert('No hay CV adjunto');
-        }
-    }
+    function verCV(filename) { if (filename) { window.open(`${API_URL}/view-cv/${filename}`, '_blank'); } else { alert('No hay CV adjunto'); } }
 
-    function cambiarTab(tab) {
+    function cambiarTab(tab, skipLoad = false) {
         const puestosTab = document.getElementById('tab-puestos');
         const postulacionesTab = document.getElementById('tab-postulaciones');
         const puestosContainer = document.getElementById('puestos-container');
         const postulacionesContainer = document.getElementById('postulaciones-container');
-        
+        const filtrosPuestos = document.getElementById('filtros-puestos');
+        const filtrosPostulaciones = document.getElementById('filtros-postulaciones');
         if (tab === 'puestos') {
             puestosTab.className = 'px-6 py-2 rounded-lg font-semibold bg-blue-600 text-white';
             postulacionesTab.className = 'px-6 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300';
             puestosContainer.classList.remove('hidden');
             postulacionesContainer.classList.add('hidden');
-            cargarPuestos();
+            filtrosPuestos.classList.remove('hidden');
+            filtrosPostulaciones.classList.add('hidden');
+            if (!skipLoad) cargarPuestos();
         } else {
             puestosTab.className = 'px-6 py-2 rounded-lg font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300';
             postulacionesTab.className = 'px-6 py-2 rounded-lg font-semibold bg-blue-600 text-white';
             puestosContainer.classList.add('hidden');
             postulacionesContainer.classList.remove('hidden');
-            cargarPostulaciones();
+            filtrosPuestos.classList.add('hidden');
+            filtrosPostulaciones.classList.remove('hidden');
+            if (!skipLoad) cargarPostulaciones();
         }
     }
 
-    function cerrarModalPuesto() {
-        document.getElementById('modal-puesto').classList.add('hidden');
-        document.getElementById('modal-puesto').classList.remove('flex');
+    function cerrarModalPuesto() { document.getElementById('modal-puesto').classList.add('hidden'); document.getElementById('modal-puesto').classList.remove('flex'); }
+    function cerrarModalPostulacion() { document.getElementById('modal-postulacion').classList.add('hidden'); document.getElementById('modal-postulacion').classList.remove('flex'); }
+
+    let cargandoPostulacionesPorPuesto = false;
+    async function verPostulacionesPorPuesto(puestoId, puestoNombre) {
+        if (cargandoPostulacionesPorPuesto) return;
+        cargandoPostulacionesPorPuesto = true;
+        cambiarTab('postulaciones', true);
+        const container = document.getElementById('postulaciones-list');
+        container.innerHTML = '<div class="text-center py-8">Cargando postulaciones...</div>';
+        try {
+            const url = `${API_URL}/admin/postulaciones?puesto_id=${puestoId}`;
+            const res = await axios.get(url);
+            if (res.data.success) {
+                const postulaciones = res.data.postulaciones;
+                if (postulaciones && postulaciones.length > 0) { renderizarPostulaciones(postulaciones); document.getElementById('postulaciones-count').innerText = `${postulaciones.length} postulaciones para ${escapeHtml(puestoNombre)}`; } 
+                else { container.innerHTML = `<div class="text-center py-8 text-gray-500"><p>📭 No hay postulaciones para el puesto: <strong>${escapeHtml(puestoNombre)}</strong></p><button onclick="verTodasPostulaciones()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">← Ver todas las postulaciones</button></div>`; }
+            } else { container.innerHTML = `<div class="text-center py-8 text-red-500">❌ ${res.data.error || 'Error cargando postulaciones'}</div>`; }
+        } catch (error) { container.innerHTML = '<div class="text-center py-8 text-red-500">❌ Error de conexión al cargar postulaciones</div>'; }
+        finally { cargandoPostulacionesPorPuesto = false; }
     }
 
-    function cerrarModalPostulacion() {
-        document.getElementById('modal-postulacion').classList.add('hidden');
-        document.getElementById('modal-postulacion').classList.remove('flex');
+    function verTodasPostulaciones() { cambiarTab('postulaciones', false); }
+
+    async function verFichaCandidato(candidatoId) {
+        if (!candidatoId) { alert('No se pudo obtener el ID del candidato'); return; }
+        try {
+            const res = await axios.get(`${API_URL}/candidate/${candidatoId}`);
+            if (!res.data.success || !res.data.candidato) { alert('No se encontró el candidato'); return; }
+            const candidato = res.data.candidato;
+            let datos = candidato;
+            if (candidato.raw_data) { try { datos = typeof candidato.raw_data === 'string' ? JSON.parse(candidato.raw_data) : candidato.raw_data; } catch(e) {} }
+            const dc = datos?.datos_crudos || {};
+            const interp = datos?.interpretacion || {};
+            const nombre = dc.nombre || candidato.nombre || 'Candidato';
+            const profesion = dc.profesion_escrita || candidato.profesion || '';
+            const perfilInterpretado = interp.perfil_interpretado || 'No disponible';
+            const sector = interp.sector_deducido || 'No inferido';
+            const experiencia = interp.anos_experiencia_deducidos || 'No inferido';
+            const seniority = interp.seniority || 'No inferido';
+            const habilidades = interp.habilidades_clave || [];
+            const fortalezas = interp.fortalezas || [];
+            const areasMejora = interp.areas_mejora || [];
+            const score = datos?.score || candidato.score || 0;
+            const criterio = datos?.criterio_ai || candidato.criterio_ai || 'No disponible';
+            const archivo = candidato.archivo;
+            const scoreClass = score >= 80 ? 'text-green-600' : score >= 60 ? 'text-blue-600' : score >= 40 ? 'text-yellow-600' : 'text-red-600';
+            const seniorityClass = seniority.toLowerCase() === 'senior' ? 'bg-green-100 text-green-700' : seniority.toLowerCase() === 'semi-senior' ? 'bg-blue-100 text-blue-700' : seniority.toLowerCase() === 'junior' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700';
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4';
+            modal.style.zIndex = '10000';
+            modal.innerHTML = `<div class="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()" style="font-family: 'Inter', sans-serif;"><div class="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center"><div><h2 class="text-xl font-bold text-gray-800">${escapeHtml(nombre)}</h2><p class="text-gray-500">${escapeHtml(profesion)}</p></div><div class="flex gap-2">${archivo ? `<button onclick="verCV('${archivo}')" class="px-4 py-2 border rounded-lg hover:bg-gray-50 transition">📄 Ver CV</button>` : ''}<button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button></div></div><div class="p-6"><div class="bg-blue-50 rounded-xl p-5 mb-6"><h3 class="font-semibold text-blue-800 mb-3">🤖 INTERPRETACIÓN IA</h3><div class="mb-4"><div class="text-xs font-semibold text-blue-600 uppercase mb-1">📊 PERFIL INTERPRETADO</div><p class="text-gray-700">${escapeHtml(perfilInterpretado)}</p></div><div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"><div><span class="text-gray-500">🏭 SECTOR DEDUCIDO</span><br><span class="font-medium">${escapeHtml(sector)}</span></div><div><span class="text-gray-500">📅 EXPERIENCIA DEDUCIDA</span><br><span class="font-medium">${escapeHtml(experiencia)}</span></div><div><span class="text-gray-500">⭐ SENIORITY</span><br><span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${seniorityClass}">${escapeHtml(seniority)}</span></div></div></div><div class="mb-6"><h3 class="font-semibold text-gray-800 mb-2">🔑 HABILIDADES CLAVE</h3>${habilidades.length > 0 ? `<div class="flex flex-wrap gap-2">${habilidades.slice(0, 5).map(h => `<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm">⭐ ${escapeHtml(h)}</span>`).join('')}</div>` : '<p class="text-gray-500 text-sm">No se detectaron habilidades específicas</p>'}</div><div class="grid md:grid-cols-2 gap-4 mb-6"><div class="bg-green-50 rounded-xl p-4"><h3 class="font-semibold text-green-700 mb-2">💪 FORTALEZAS</h3>${fortalezas.length > 0 ? `<ul class="list-disc pl-4 text-sm text-gray-700">${fortalezas.map(f => `<li>${escapeHtml(f)}</li>`).join('')}</ul>` : '<p class="text-gray-500 text-sm">No especificadas</p>'}</div><div class="bg-orange-50 rounded-xl p-4"><h3 class="font-semibold text-orange-700 mb-2">📈 ÁREAS DE MEJORA</h3>${areasMejora.length > 0 ? `<ul class="list-disc pl-4 text-sm text-gray-700">${areasMejora.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul>` : '<p class="text-gray-500 text-sm">No especificadas</p>'}</div></div><div class="flex justify-between items-center pt-4 border-t"><div><span class="text-xs text-gray-500">Score IA</span><div class="text-3xl font-bold ${scoreClass}">${score}</div></div><div><span class="text-xs text-gray-500">Criterio</span><div class="text-lg font-semibold text-gray-800">${escapeHtml(criterio)}</div></div></div></div></div>`;
+            document.body.appendChild(modal);
+        } catch (error) { console.error('Error:', error); alert('Error cargando la ficha del candidato: ' + (error.response?.data?.error || error.message)); }
     }
 </script>
 </body>

@@ -10,6 +10,7 @@ import AdminEntrevistas from './pages/AdminEntrevistas';
 import EntrevistasDashboard from './components/EntrevistasDashboard';
 import HeadhunterIA from './pages/HeadhunterIA';
 import Dashboard from './pages/Dashboard';
+import GestionCorreosPage from './pages/GestionCorreosPage';
 
 // Placeholder para páginas que aún no hemos migrado
 const Placeholder = ({ title }) => (
@@ -31,7 +32,7 @@ function App() {
           <Route path="ai-match" element={<AIMatch />} />
           <Route path="headhunter" element={<HeadhunterIA />} />
           <Route path="entrevistas" element={<AdminEntrevistas />} />
-          <Route path="correos" element={<Placeholder title="Correos" />} />
+          <Route path="correos" element={<GestionCorreosPage />} />
           <Route path="reclutamiento" element={<KanbanReclutamiento />} />
           <Route path="admin-empleos" element={<AdminEmpleos />} />
           <Route path="configuracion" element={<Placeholder title="Configuración" />} />

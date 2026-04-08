@@ -7,6 +7,11 @@ import pdfplumber
 import docx
 import docx2txt
 import mammoth
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
 from io import BytesIO
 from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
@@ -24,6 +29,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 import jwt
 from werkzeug.middleware.proxy_fix import ProxyFix
+
 
 
 # =====================================================
@@ -789,6 +795,35 @@ def api_get_candidates():
         return jsonify({"success": True, "data": candidates})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+    
+@app.route("/api/candidate/<int:candidate_id>", methods=["GET"])
+def api_get_candidate(candidate_id):
+    """Obtiene un candidato específico por ID"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cursor.execute("""
+            SELECT id, archivo, nombre, profesion, score, criterio_ai, raw_data, fecha_analisis
+            FROM candidates 
+            WHERE id = %s
+        """, (candidate_id,))
+        
+        candidato = cursor.fetchone()
+        conn.close()
+        
+        if not candidato:
+            return jsonify({"success": False, "error": "Candidato no encontrado"}), 404
+        
+        return jsonify({
+            "success": True,
+            "candidato": candidato
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route("/api/analyze", methods=["POST"])
 @limiter.limit("10 per minute")
@@ -1374,15 +1409,15 @@ def procesar_pendientes_entrevistas():  # 🔥 NOMBRE DIFERENTE
 
 @app.route("/api/asistente", methods=["POST"])
 def asistente_inteligente():
-    """Headhunter inteligente - todo lo hace la IA"""
+    """Headhunter inteligente - búsqueda híbrida + IA"""
     try:
         data = request.json
         pregunta = data.get('mensaje', '')
         
         print(f"\n🤵 HEADHUNTER: '{pregunta}'")
         
-        # Buscar candidatos relevantes
-        candidatos = buscar_por_embedding(pregunta, 15)
+        # 🔥 CAMBIO 1: Usar búsqueda híbrida en lugar de solo embedding
+        candidatos = buscar_hibrido(pregunta, 25)
         print(f"📊 Encontrados {len(candidatos)} candidatos")
         
         if not candidatos:
@@ -1393,7 +1428,8 @@ def asistente_inteligente():
         
         # Construir perfiles de los candidatos
         perfiles = []
-        for i, c in enumerate(candidatos[:8]):  # Máximo 8
+        # 🔥 CAMBIO 2: Aumentar de 8 a 15 candidatos
+        for i, c in enumerate(candidatos[:15]):
             try:
                 if c.get('raw_data'):
                     datos = json.loads(c['raw_data']) if isinstance(c['raw_data'], str) else c['raw_data']
@@ -1433,10 +1469,8 @@ Habilidades: {', '.join(habilidades) if habilidades else 'No especificadas'}
                 "success": True,
                 "respuesta": "No pude procesar los perfiles de los candidatos."
             })
-        print(f"🔍 PERFIL ENVIADO A IA:\n{perfil}\n")
-        # =====================================================
-        # DEJAR QUE LA IA ANALICE TODO
-        # =====================================================
+        
+        # Prompt para ChatGPT
         prompt = f"""
 Eres un headhunter experto con 20 años de experiencia. El usuario pregunta:
 
@@ -1456,7 +1490,7 @@ Luego, para cada candidato que cumpla con la búsqueda, incluye:
 - Si no cumple, dilo claramente
 
 REGLAS:
-- Si la pregunta es por ubicación (ej: "alguien de Liberia"), verifica la ubicación del candidato
+- Si la pregunta es por ubicación, verifica la ubicación del candidato
 - Si la pregunta es por empresa, verifica las empresas donde trabajó
 - Si la pregunta es por habilidad, verifica sus habilidades
 - Si la pregunta es por experiencia, verifica los años
@@ -3743,6 +3777,146 @@ Devuelve SOLO JSON con:
 """
     return prompt
 
+
+def extraer_terminos_busqueda(texto):
+    """Extrae términos clave de forma GENÉRICA (sin listas predefinidas)"""
+    import re
+    
+    terminos = []
+    
+    # 1. Palabras entre comillas (búsqueda exacta)
+    comillas = re.findall(r'"([^"]+)"', texto)
+    terminos.extend(comillas)
+    
+    # 2. Frases con mayúsculas (posibles nombres propios)
+    mayusculas = re.findall(r'\b[A-Z][a-záéíóúñ]+(?:\s+[A-Z][a-záéíóúñ]+)*\b', texto)
+    for m in mayusculas:
+        if len(m) > 3:
+            terminos.append(m)
+    
+    # 3. Palabras de 4+ caracteres (excluyendo stopwords)
+    stopwords = {'dame', 'busca', 'encuentra', 'quiero', 'necesito', 'alguien', 'que', 
+                 'haya', 'trabajado', 'estudiado', 'vivido', 'con', 'para', 'por', 'los', 
+                 'las', 'una', 'una', 'como', 'cuando', 'donde', 'cual', 'quien', 'esta', 
+                 'este', 'esto', 'sobre', 'entre', 'durante', 'mediante', 'través'}
+    
+    palabras = re.findall(r'\b[a-záéíóúñ]{4,}\b', texto.lower())
+    for p in palabras:
+        if p not in stopwords:
+            terminos.append(p)
+    
+    # 4. Eliminar duplicados
+    terminos = list(set(terminos))
+    
+    print(f"🔍 Términos extraídos: {terminos[:10]}...")
+    return terminos
+
+
+def buscar_por_similitud_texto(terminos, limite=30):
+    """Busca candidatos por similitud de texto en TODOS los campos usando pg_trgm"""
+    try:
+        if not terminos:
+            return []
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Campos donde buscar (todos los relevantes)
+        campos = [
+            "raw_data::jsonb->'datos_crudos'->>'nombre'",
+            "raw_data::jsonb->'datos_crudos'->>'profesion_escrita'",
+            "raw_data::jsonb->'datos_crudos'->>'universidad'",
+            "raw_data::jsonb->'datos_crudos'->>'empresas'::text",
+            "raw_data::jsonb->'datos_crudos'->>'ubicacion'",
+            "raw_data::jsonb->'interpretacion'->>'perfil_interpretado'",
+            "raw_data::jsonb->'interpretacion'->>'habilidades_clave'::text",
+            "raw_data::jsonb->'interpretacion'->>'fortalezas'::text",
+            "raw_data::jsonb->'interpretacion'->>'areas_mejora'::text"
+        ]
+        
+        condiciones = []
+        params = []
+        
+        for termino in terminos:
+            for campo in campos:
+                condiciones.append(f"{campo} % %s")
+                params.append(termino)
+        
+        if not condiciones:
+            conn.close()
+            return []
+        
+        query = f"""
+            SELECT DISTINCT ON (id) 
+                id, 
+                nombre, 
+                raw_data,
+                'texto' as fuente_match,
+                90 as score_match
+            FROM candidates
+            WHERE {' OR '.join(condiciones)}
+            LIMIT %s
+        """
+        params.append(limite)
+        
+        cursor.execute(query, params)
+        resultados = cursor.fetchall()
+        conn.close()
+        
+        candidatos = []
+        for row in resultados:
+            candidato = {
+                'id': row['id'],
+                'nombre': row['nombre'],
+                'raw_data': row['raw_data'],
+                'fuente_match': 'texto',
+                'score_match': 90,
+                'similitud_semantica': 90
+            }
+            candidatos.append(candidato)
+        
+        print(f"✅ Búsqueda por similitud de texto devolvió {len(candidatos)} candidatos")
+        return candidatos
+        
+    except Exception as e:
+        print(f"❌ Error en búsqueda por similitud de texto: {e}")
+        return []
+    
+
+def buscar_hibrido(pregunta, limite_final=30):
+    """Búsqueda híbrida: embedding + similitud de texto (pg_trgm) - GENÉRICA"""
+    
+    # 1. Extraer términos de la pregunta
+    terminos = extraer_terminos_busqueda(pregunta)
+    print(f"🔍 Términos extraídos: {terminos}")
+    
+    resultados_dict = {}
+    
+    # 2. Búsqueda por similitud de texto (si hay términos)
+    if terminos:
+        resultados_texto = buscar_por_similitud_texto(terminos, 20)
+        for r in resultados_texto:
+            if r['id'] not in resultados_dict:
+                resultados_dict[r['id']] = r
+    
+    # 3. Búsqueda por embedding (siempre)
+    resultados_embedding = buscar_por_embedding(pregunta, 30)
+    for r in resultados_embedding:
+        if r['id'] not in resultados_dict:
+            r['fuente_match'] = 'embedding'
+            r['score_match'] = r.get('similitud_semantica', 50)
+            resultados_dict[r['id']] = r
+    
+    # 4. Ordenar: primero los de texto (score 90), luego embedding
+    resultados_ordenados = sorted(
+        resultados_dict.values(),
+        key=lambda x: (-x.get('score_match', 0), x.get('fuente_match', 'embedding'))
+    )
+    
+    # 5. Limitar resultados
+    return resultados_ordenados[:limite_final]    
+
+
 @app.route("/api/entrevista/video/<filename>", methods=["GET"])
 def ver_video_entrevista(filename):
     """Sirve el video de la entrevista con soporte para Safari"""
@@ -3901,7 +4075,7 @@ def api_obtener_puesto(puesto_id):
 
 @app.route("/api/postular", methods=["POST"])
 def api_postular():
-    """Postula un candidato a un puesto"""
+    """Postula un candidato a un puesto - PROCESO COMPLETO ASÍNCRONO"""
     try:
         nombre = request.form.get('nombre')
         email = request.form.get('email')
@@ -3917,7 +4091,7 @@ def api_postular():
         
         # Procesar CV si se subió
         cv_filename = None
-        cv_analisis = '{}'
+        candidate_id = None
         
         if 'cv' in request.files:
             cv_file = request.files['cv']
@@ -3927,31 +4101,252 @@ def api_postular():
                 cv_path = os.path.join(UPLOAD_FOLDER, cv_filename)
                 cv_file.save(cv_path)
                 
-                # Analizar CV con IA
+                # Extraer texto del CV
                 text = extract_text(cv_path)
+                
                 if text and len(text) > 50:
+                    # Analizar CV con IA
                     data = analyze_cv(text, "gpt")
                     data = normalize_lists(data)
                     data = score_candidate(data)
-                    cv_analisis = json.dumps(data)
+                    data["archivo"] = cv_filename
+                    data["fecha_analisis"] = datetime.now().isoformat()
+                    
+                    # Guardar en la tabla candidates
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    cursor.callproc('crear_candidato', [cv_filename, json.dumps(data, ensure_ascii=False)])
+                    candidate_id = cursor.fetchone()[0]
+                    conn.commit()
+                    conn.close()
+                    
+                    # Generar embedding
+                    generar_embedding_candidato(data, candidate_id)
+                    
+                    print(f"✅ Candidato guardado con ID: {candidate_id}")
         
-        # Llamar al procedimiento almacenado
+        # Buscar candidato por email si no se creó uno nuevo
+        if not candidate_id and email:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.id FROM candidates c
+                WHERE c.raw_data::jsonb->'datos_crudos'->>'email' = %s
+                LIMIT 1
+            """, (email,))
+            row = cursor.fetchone()
+            if row:
+                candidate_id = row[0]
+            conn.close()
+        
+        # Verificar si ya postuló a este puesto
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT crear_postulacion(%s, %s, %s, %s, %s, %s, %s::jsonb)
-        """, (nombre, email, telefono, puesto_id, json.dumps(respuestas), cv_filename, cv_analisis))
+        if candidate_id:
+            cursor.execute("""
+                SELECT 1 FROM postulaciones 
+                WHERE candidato_id = %s AND puesto_id = %s
+            """, (candidate_id, puesto_id))
+            if cursor.fetchone():
+                conn.close()
+                return jsonify({
+                    "success": False, 
+                    "error": "Ya has postulado a este puesto anteriormente"
+                })
         
-        result = cursor.fetchone()[0]
+        # Crear postulación
+        cursor.execute("""
+            INSERT INTO postulaciones (candidato_id, puesto_id, respuestas_formulario, cv_filename, estado)
+            VALUES (%s, %s, %s, %s, 'pendiente')
+            RETURNING id
+        """, (candidate_id, puesto_id, json.dumps(respuestas), cv_filename))
+        
+        postulacion_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         
-        return jsonify(result)
+        # 🔥 DISPARAR ANÁLISIS EN SEGUNDO PLANO (no esperar respuesta)
+        import threading
+        thread = threading.Thread(target=analizar_postulacion_background, args=(postulacion_id,))
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": "Postulación recibida exitosamente. El equipo evaluará tu perfil.",
+            "postulacion_id": postulacion_id
+        })
         
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/postulacion/estado/<int:postulacion_id>", methods=["GET"])
+def postulacion_estado(postulacion_id):
+    """Verifica si una postulación ya tiene análisis"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cursor.execute("""
+            SELECT id, match_score, match_analisis IS NOT NULL as tiene_analisis, estado
+            FROM postulaciones 
+            WHERE id = %s
+        """, (postulacion_id,))
+        
+        postulacion = cursor.fetchone()
+        conn.close()
+        
+        if not postulacion:
+            return jsonify({"success": False, "error": "No encontrada"}), 404
+        
+        return jsonify({
+            "success": True,
+            "tiene_analisis": postulacion['tiene_analisis'],
+            "match_score": postulacion['match_score'],
+            "estado": postulacion['estado']
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def calcular_match_score_con_ia(candidate_id, puesto_id):
+    """Calcula el match score usando el análisis estructurado del CV y los requisitos del puesto"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Obtener datos del candidato
+        cursor.execute("""
+            SELECT raw_data FROM candidates WHERE id = %s
+        """, (candidate_id,))
+        candidato_row = cursor.fetchone()
+        
+        # Obtener datos del puesto
+        cursor.execute("""
+            SELECT * FROM puestos_trabajo WHERE id = %s
+        """, (puesto_id,))
+        puesto = cursor.fetchone()
+        
+        conn.close()
+        
+        if not candidato_row or not puesto:
+            return {"score": 0, "analisis": {}}
+        
+        # Parsear datos del candidato (ya estructurados por analyze_cv)
+        candidato_data = candidato_row['raw_data']
+        if isinstance(candidato_data, str):
+            candidato_data = json.loads(candidato_data)
+        
+        dc = candidato_data.get('datos_crudos', {})
+        interp = candidato_data.get('interpretacion', {})
+        
+        # Construir prompt para evaluación
+        prompt = f"""
+Actúa como un Headhunter Senior experto en evaluar candidatos para puestos específicos.
+
+## 📋 PERFIL DEL PUESTO
+
+**Título:** {puesto['titulo']}
+**Cliente:** {puesto['cliente']}
+**Seniority requerido:** {puesto['seniority'] or 'No especificado'}
+**Ubicación:** {puesto['ubicacion'] or 'No especificada'}
+**Modalidad:** {puesto.get('modalidad', 'No especificada')}
+
+**Descripción:**
+{puesto['descripcion'] or 'No disponible'}
+
+**Requisitos:**
+{puesto['requisitos'] or 'No especificados'}
+
+**Habilidades requeridas:**
+{', '.join(puesto['habilidades_requeridas'] or [])}
+
+**Responsabilidades:**
+{chr(10).join(['- ' + r for r in (puesto.get('responsabilidades') or [])])}
+
+## 👤 PERFIL DEL CANDIDATO (Extraído de su CV)
+
+**Nombre:** {dc.get('nombre', 'No disponible')}
+**Profesión:** {dc.get('profesion_escrita', 'No disponible')}
+**Ubicación:** {dc.get('ubicacion', 'No disponible')}
+**Universidad:** {dc.get('universidad', 'No disponible')}
+**Grado académico:** {dc.get('grado_academico', 'No disponible')}
+**Años de experiencia:** {interp.get('anos_experiencia_deducidos', 'No disponible')}
+**Seniority detectado:** {interp.get('seniority', 'No disponible')}
+**Sector:** {interp.get('sector_deducido', 'No disponible')}
+
+**Empresas donde ha trabajado:**
+{chr(10).join(['- ' + e for e in (dc.get('empresas', []))]) if dc.get('empresas') else 'No especificadas'}
+
+**Habilidades clave:**
+{', '.join(interp.get('habilidades_clave', [])) if interp.get('habilidades_clave') else 'No especificadas'}
+
+**Certificaciones:**
+{', '.join(dc.get('certificaciones', [])) if dc.get('certificaciones') else 'No especificadas'}
+
+**Perfil interpretado por IA:**
+{interp.get('perfil_interpretado', 'No disponible')}
+
+**Fortalezas del candidato:**
+{chr(10).join(['- ' + f for f in (interp.get('fortalezas', []))]) if interp.get('fortalezas') else 'No especificadas'}
+
+**Áreas de mejora según CV:**
+{chr(10).join(['- ' + a for a in (interp.get('areas_mejora', []))]) if interp.get('areas_mejora') else 'No especificadas'}
+
+**Recomendación del análisis de CV:**
+{interp.get('recomendacion', 'No disponible')}
+
+## 🎯 TAREA
+
+Evalúa qué tan buen match es este candidato para el puesto. Devuelve SOLO JSON:
+
+{{
+  "score": 0-100,
+  "resumen": "resumen ejecutivo de 2-3 líneas",
+  "fortalezas": ["fortaleza1", "fortaleza2", "fortaleza3"],
+  "debilidades": ["debilidad1", "debilidad2"],
+  "habilidades_coincidentes": ["habilidad1", "habilidad2"],
+  "habilidades_faltantes": ["habilidad que el puesto requiere y el candidato no tiene"],
+  "analisis_experiencia": "comentario sobre su experiencia relevante",
+  "analisis_formacion": "comentario sobre su formación",
+  "recomendacion": "avanzar/entrevistar/descartar",
+  "justificacion": "explicación detallada del score y la recomendación"
+}}
+
+**Importante:** Sé honesto y crítico. Basa tu evaluación en los datos proporcionados.
+"""
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1500
+        )
+        
+        contenido = response.choices[0].message.content
+        resultado = safe_json_parse(contenido)
+        
+        # Guardar el análisis en la postulación
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE postulaciones 
+            SET match_score = %s, match_analisis = %s::jsonb
+            WHERE candidato_id = %s AND puesto_id = %s
+        """, (resultado.get('score', 0), json.dumps(resultado, ensure_ascii=False), candidate_id, puesto_id))
+        conn.commit()
+        conn.close()
+        
+        return resultado
+        
+    except Exception as e:
+        print(f"❌ Error calculando match: {e}")
+        return {"score": 0, "analisis": {}}
 
 
 @app.route("/api/mis-postulaciones", methods=["GET"])
@@ -4178,20 +4573,36 @@ def admin_guardar_preguntas():
 
 @app.route("/api/admin/postulaciones", methods=["GET"])
 def admin_obtener_postulaciones():
-    """Obtiene todas las postulaciones"""
+    """Obtiene todas las postulaciones, opcionalmente filtradas por puesto"""
     try:
         estado = request.args.get('estado')
+        puesto_id = request.args.get('puesto_id')
+        
+        print(f"🔍 Parámetros recibidos - estado: {estado}, puesto_id: {puesto_id}")
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT obtener_postulaciones_admin(%s)", (estado,))
+        # Llamar al procedimiento almacenado con los dos parámetros
+        # El orden debe coincidir con la definición en PostgreSQL: (p_estado, p_puesto_id)
+        cursor.callproc('obtener_postulaciones_admin', [estado, puesto_id])
+        
+        # Obtener resultado (el procedimiento devuelve un JSONB)
         result = cursor.fetchone()[0]
         conn.close()
+        
+        # Si el resultado es string, parsearlo
+        if isinstance(result, str):
+            result = json.loads(result)
+        
+        print(f"📥 Resultado: {result.get('success', False)} - {len(result.get('postulaciones', []))} postulaciones")
         
         return jsonify(result)
         
     except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -4204,20 +4615,29 @@ def admin_actualizar_estado():
         estado = data.get('estado')
         match_score = data.get('match_score')
         
+        print(f"📝 Actualizando postulación {postulacion_id} a estado: {estado}")
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT actualizar_estado_postulacion(%s, %s, %s)
-        """, (postulacion_id, estado, match_score))
+            UPDATE postulaciones 
+            SET estado = %s, match_score = COALESCE(%s, match_score)
+            WHERE id = %s
+            RETURNING id
+        """, (estado, match_score, postulacion_id))
         
-        result = cursor.fetchone()[0]
+        result = cursor.fetchone()
         conn.commit()
         conn.close()
         
-        return jsonify(result)
+        if result:
+            return jsonify({"success": True, "message": f"Estado actualizado a {estado}"})
+        else:
+            return jsonify({"success": False, "error": "Postulación no encontrada"}), 404
         
     except Exception as e:
+        print(f"❌ Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
     
 @app.route('/admin-empleos.html')
@@ -4845,7 +5265,7 @@ def api_obtener_variables():
 # =====================================================
 
 @app.route("/api/configuracion", methods=["GET"])
-@limiter.limit("30 per minute")
+@limiter.limit("100 per minute")
 def api_obtener_configuracion():
     """Obtiene toda la configuración del sistema"""
     try:
@@ -4886,6 +5306,7 @@ def api_actualizar_configuracion():
         
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+    
 
 
 @app.route("/api/configuracion/grupo/<grupo>", methods=["GET"])
@@ -5052,6 +5473,840 @@ def get_dashboard_data():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/candidato-ficha/<int:candidato_id>')
+def candidato_ficha(candidato_id):
+    """Renderiza la ficha del candidato (misma que usa TalentoPipeline)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cursor.execute("""
+            SELECT id, archivo, nombre, profesion, score, criterio_ai, raw_data, fecha_analisis
+            FROM candidates 
+            WHERE id = %s
+        """, (candidato_id,))
+        
+        candidato = cursor.fetchone()
+        conn.close()
+        
+        if not candidato:
+            return "Candidato no encontrado", 404
+        
+        # Parsear raw_data
+        datos = candidato['raw_data']
+        if isinstance(datos, str):
+            datos = json.loads(datos)
+        
+        dc = datos.get('datos_crudos', {})
+        interp = datos.get('interpretacion', {})
+        
+        score = candidato['score'] or 0
+        scoreColor = '#16a34a' if score >= 80 else '#2563eb' if score >= 60 else '#ca8a04' if score >= 40 else '#dc2626'
+        
+        # Generar HTML de la ficha (idéntica a la de TalentoPipeline)
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Ficha de Candidato | Talent Pipeline</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                * {{ font-family: 'Inter', sans-serif; }}
+                body {{ background: #f1f5f9; padding: 20px; }}
+                .modal-professional {{
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 24px;
+                    overflow: hidden;
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                }}
+                .modal-header {{
+                    background: white;
+                    border-bottom: 1px solid #e2e8f0;
+                    padding: 20px 24px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }}
+                .modal-header h2 {{ font-size: 1.5rem; font-weight: 700; color: #1e293b; }}
+                .modal-header p {{ color: #64748b; margin-top: 4px; }}
+                .btn-outline {{
+                    padding: 8px 16px;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 10px;
+                    background: white;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }}
+                .btn-outline:hover {{ background: #f1f5f9; border-color: #3b82f6; }}
+                .modal-body {{ padding: 24px; }}
+                .modal-section {{ margin-bottom: 24px; }}
+                .modal-section h3 {{ font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; color: #1e293b; }}
+                .modal-section.highlight {{ background: #f8fafc; border-radius: 16px; padding: 20px; }}
+                .ia-perfil-container {{ margin-bottom: 20px; }}
+                .ia-label {{ font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }}
+                .ia-text {{ color: #1e293b; line-height: 1.5; }}
+                .ia-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 16px;
+                    margin-bottom: 20px;
+                }}
+                .ia-item {{
+                    background: white;
+                    padding: 12px;
+                    border-radius: 12px;
+                    border: 1px solid #e2e8f0;
+                }}
+                .badge {{
+                    display: inline-block;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 0.75rem;
+                    font-weight: 500;
+                }}
+                .badge-sector {{ background: #dbeafe; color: #1e40af; }}
+                .badge-experiencia {{ background: #dcfce7; color: #166534; }}
+                .badge-senior {{ background: #d1fae5; color: #065f46; }}
+                .badge-semi-senior {{ background: #dbeafe; color: #1e40af; }}
+                .badge-junior {{ background: #fef3c7; color: #92400e; }}
+                .badge-trainee {{ background: #f3f4f6; color: #374151; }}
+                .ia-tags {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
+                .tag-empresa, .tag-industria, .tag-habilidad {{
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 0.75rem;
+                    background: #f1f5f9;
+                    color: #475569;
+                }}
+                .tag-habilidad {{ background: #ede9fe; color: #6d28d9; }}
+                .tag-empresa {{ background: #d1fae5; color: #065f46; }}
+                .ia-grid-2 {{
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 16px;
+                    margin-bottom: 20px;
+                }}
+                .ia-list {{ list-style: disc; padding-left: 20px; color: #475569; font-size: 0.875rem; }}
+                .ia-list li {{ margin-bottom: 4px; }}
+                .info-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 12px;
+                }}
+                .info-grid div label {{ font-size: 0.7rem; font-weight: 600; color: #64748b; display: block; }}
+                .info-grid div span {{ color: #1e293b; font-size: 0.875rem; }}
+                .modal-footer {{
+                    background: #f8fafc;
+                    border-top: 1px solid #e2e8f0;
+                    padding: 16px 24px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }}
+                .score-display {{
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }}
+                .score-label {{ font-size: 0.75rem; color: #64748b; }}
+                .score-value {{ font-size: 1.5rem; font-weight: 700; }}
+                .score-80 {{ color: #16a34a; }}
+                .score-60 {{ color: #2563eb; }}
+                .score-40 {{ color: #ca8a04; }}
+                .score-20 {{ color: #dc2626; }}
+                .criterio {{ font-size: 0.875rem; font-weight: 500; color: #475569; }}
+                .btn-close {{
+                    background: none;
+                    border: none;
+                    font-size: 1.5rem;
+                    cursor: pointer;
+                    color: #94a3b8;
+                }}
+                .btn-close:hover {{ color: #475569; }}
+            </style>
+        </head>
+        <body>
+            <div class="modal-professional">
+                <div class="modal-header">
+                    <div>
+                        <h2>{escape_html(dc.get('nombre', candidato['nombre'] or 'Candidato'))}</h2>
+                        <p>{escape_html(dc.get('profesion_escrita', candidato['profesion'] or ''))}</p>
+                    </div>
+                    <div style="display: flex; gap: 12px;">
+                        <button class="btn-outline" onclick="verCV('{candidato['archivo']}')">📄 Ver CV</button>
+                        <button class="btn-close" onclick="window.close()">×</button>
+                    </div>
+                </div>
+                
+                <div class="modal-body">
+                    <div class="modal-section highlight">
+                        <h3>🤖 INTERPRETACIÓN IA</h3>
+                        
+                        <div class="ia-perfil-container">
+                            <div class="ia-label">📊 PERFIL INTERPRETADO</div>
+                            <p class="ia-text">{escape_html(interp.get('perfil_interpretado', 'No disponible'))}</p>
+                        </div>
+                        
+                        <div class="ia-grid">
+                            <div class="ia-item">
+                                <div class="ia-label">🏭 SECTOR DEDUCIDO</div>
+                                <span class="badge badge-sector">{escape_html(interp.get('sector_deducido', 'No inferido'))}</span>
+                            </div>
+                            <div class="ia-item">
+                                <div class="ia-label">📅 EXPERIENCIA DEDUCIDA</div>
+                                <span class="badge badge-experiencia">{escape_html(interp.get('anos_experiencia_deducidos', 'No inferido'))}</span>
+                            </div>
+                            <div class="ia-item">
+                                <div class="ia-label">⭐ SENIORITY</div>
+                                <span class="badge badge-{interp.get('seniority', 'trainee').lower()}">{escape_html(interp.get('seniority', 'No inferido'))}</span>
+                            </div>
+                            <div class="ia-item">
+                                <div class="ia-label">🏢 INDUSTRIA PRINCIPAL</div>
+                                <span class="badge badge-sector">{escape_html(interp.get('industria_principal', 'No inferido'))}</span>
+                            </div>
+                        </div>
+                        
+                        {f'''
+                        <div class="ia-section">
+                            <div class="ia-label">🏢 EMPRESAS DESTACADAS</div>
+                            <div class="ia-tags">
+                                {''.join([f'<span class="tag-empresa">🏢 {escape_html(emp)}</span>' for emp in (dc.get('empresas', [])[:6])])}
+                            </div>
+                        </div>
+                        ''' if dc.get('empresas') else ''}
+                        
+                        {f'''
+                        <div class="ia-section">
+                            <div class="ia-label">🔑 HABILIDADES CLAVE</div>
+                            <div class="ia-tags">
+                                {''.join([f'<span class="tag-habilidad">⭐ {escape_html(hab)}</span>' for hab in (interp.get('habilidades_clave', [])[:8])])}
+                            </div>
+                        </div>
+                        ''' if interp.get('habilidades_clave') else ''}
+                        
+                        <div class="ia-grid-2">
+                            {f'''
+                            <div class="ia-section">
+                                <div class="ia-label">💪 FORTALEZAS</div>
+                                <ul class="ia-list">
+                                    {''.join([f'<li>{escape_html(f)}</li>' for f in (interp.get('fortalezas', [])[:5])])}
+                                </ul>
+                            </div>
+                            ''' if interp.get('fortalezas') else ''}
+                            
+                            {f'''
+                            <div class="ia-section">
+                                <div class="ia-label">📈 ÁREAS DE MEJORA</div>
+                                <ul class="ia-list">
+                                    {''.join([f'<li>{escape_html(a)}</li>' for a in (interp.get('areas_mejora', [])[:5])])}
+                                </ul>
+                            </div>
+                            ''' if interp.get('areas_mejora') else ''}
+                        </div>
+                        
+                        {f'''
+                        <div class="ia-section">
+                            <div class="ia-label">👔 ROL TÍPICO</div>
+                            <div class="ia-valor">{escape_html(interp.get('rol_tipico', ''))}</div>
+                        </div>
+                        ''' if interp.get('rol_tipico') else ''}
+                        
+                        {f'''
+                        <div class="ia-section">
+                            <div class="ia-label">🎯 RECOMENDACIÓN</div>
+                            <div class="ia-valor destacado">{escape_html(interp.get('recomendacion', ''))}</div>
+                        </div>
+                        ''' if interp.get('recomendacion') else ''}
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h3>📄 DATOS DEL CV</h3>
+                        <div class="info-grid">
+                            <div><label>📞 Teléfono</label><span>{escape_html(dc.get('telefono', '—'))}</span></div>
+                            <div><label>✉️ Email</label><span>{escape_html(dc.get('email', '—'))}</span></div>
+                            <div><label>📍 Ubicación</label><span>{escape_html(dc.get('ubicacion', '—'))}</span></div>
+                            <div><label>🎓 Carrera</label><span>{escape_html(dc.get('profesion_escrita', '—'))}</span></div>
+                            <div><label>🏛️ Universidad</label><span>{escape_html(dc.get('universidad', '—'))}</span></div>
+                            <div><label>📜 Grado</label><span>{escape_html(dc.get('grado_academico', '—'))}</span></div>
+                        </div>
+                        
+                        {f'''
+                        <div class="ia-label" style="margin-top: 1rem;">📜 Certificaciones</div>
+                        <div class="ia-tags">
+                            {''.join([f'<span class="tag-certificacion">{escape_html(cert)}</span>' for cert in (dc.get('certificaciones', [])[:5])])}
+                        </div>
+                        ''' if dc.get('certificaciones') else ''}
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <div class="score-display">
+                        <span class="score-label">Score IA</span>
+                        <span class="score-value score-{score - (score % 20)}">{score}</span>
+                    </div>
+                    <span class="criterio">{escape_html(interp.get('criterio_ai', candidato.get('criterio_ai', 'No disponible')))}</span>
+                </div>
+            </div>
+            <script>
+                function verCV(filename) {{
+                    if (filename) {{
+                        window.open('/api/view-cv/' + filename, '_blank');
+                    }} else {{
+                        alert('No hay CV adjunto');
+                    }}
+                }}
+            </script>
+        </body>
+        </html>
+        """
+        
+        return html
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return f"Error: {e}", 500
+
+def escape_html(text):
+    if not text:
+        return ''
+    return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;')
+
+@app.route("/api/analizar-postulacion/<int:postulacion_id>", methods=["GET"])
+def analizar_postulacion(postulacion_id):
+    """Analiza una postulación con IA, comparando CV del candidato vs requisitos del puesto"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Obtener datos de la postulación
+        cursor.execute("""
+            SELECT 
+                p.id,
+                p.match_score,
+                p.respuestas_formulario,
+                p.cv_filename,
+                c.id as candidato_id,
+                c.raw_data as candidato_raw,
+                pu.id as puesto_id,
+                pu.titulo as puesto_titulo,
+                pu.cliente as puesto_cliente,
+                pu.descripcion as puesto_descripcion,
+                pu.requisitos as puesto_requisitos,
+                pu.habilidades_requeridas,
+                pu.seniority as puesto_seniority,
+                pu.responsabilidades,
+                pu.beneficios,
+                pu.sobre_empresa,
+                pu.modalidad
+            FROM postulaciones p
+            JOIN candidates c ON p.candidato_id = c.id
+            JOIN puestos_trabajo pu ON p.puesto_id = pu.id
+            WHERE p.id = %s
+        """, (postulacion_id,))
+        
+        postulacion = cursor.fetchone()
+        conn.close()
+        
+        if not postulacion:
+            return jsonify({"success": False, "error": "Postulación no encontrada"}), 404
+        
+        # Parsear datos del candidato
+        candidato_data = postulacion['candidato_raw']
+        if isinstance(candidato_data, str):
+            candidato_data = json.loads(candidato_data)
+        
+        # Extraer información del candidato
+        dc = candidato_data.get('datos_crudos', {})
+        interp = candidato_data.get('interpretacion', {})
+        
+        # Construir prompt para IA
+        prompt = f"""
+Actúa como un Headhunter Senior con 20 años de experiencia. Vas a evaluar la calidad de una postulación.
+
+## 📋 INFORMACIÓN DEL PUESTO
+
+**Puesto:** {postulacion['puesto_titulo']}
+**Cliente:** {postulacion['puesto_cliente']}
+**Seniority requerido:** {postulacion['puesto_seniority'] or 'No especificado'}
+**Modalidad:** {postulacion['modalidad'] or 'No especificada'}
+
+**Descripción del puesto:**
+{postulacion['puesto_descripcion'] or 'No disponible'}
+
+**Requisitos del puesto:**
+{postulacion['puesto_requisitos'] or 'No especificados'}
+
+**Habilidades requeridas:**
+{', '.join(postulacion['habilidades_requeridas'] or [])}
+
+## 👤 PERFIL DEL CANDIDATO (Extraído de su CV)
+
+**Nombre:** {dc.get('nombre', 'No disponible')}
+**Profesión:** {dc.get('profesion_escrita', 'No disponible')}
+**Ubicación:** {dc.get('ubicacion', 'No disponible')}
+**Años de experiencia:** {interp.get('anos_experiencia_deducidos', 'No disponible')}
+**Seniority detectado:** {interp.get('seniority', 'No disponible')}
+**Sector:** {interp.get('sector_deducido', 'No disponible')}
+
+**Empresas donde ha trabajado:**
+{', '.join(dc.get('empresas', [])) if dc.get('empresas') else 'No especificadas'}
+
+**Habilidades clave:**
+{', '.join(interp.get('habilidades_clave', [])) if interp.get('habilidades_clave') else 'No especificadas'}
+
+**Perfil interpretado por IA:**
+{interp.get('perfil_interpretado', 'No disponible')}
+
+## 🎯 TAREA
+
+Evalúa qué tan buen match es este candidato para el puesto. Devuelve SOLO JSON:
+
+{{
+  "score_ia": 0-100,
+  "resumen_ejecutivo": "resumen ejecutivo de 2-3 líneas",
+  "fortalezas_destacadas": ["fortaleza1", "fortaleza2", "fortaleza3"],
+  "areas_mejora": ["area1", "area2"],
+  "habilidades_coincidentes": ["habilidad1", "habilidad2"],
+  "habilidades_faltantes": ["habilidad que el puesto requiere y el candidato no tiene"],
+  "analisis_experiencia": "comentario sobre su experiencia relevante",
+  "analisis_formacion": "comentario sobre su formación",
+  "recomendacion": "avanzar/entrevistar/descartar",
+  "confiabilidad_analisis": "Alta/Media/Baja",
+  "justificacion": "explicación detallada del score"
+}}
+
+**Importante:** Sé honesto y crítico. Basa tu evaluación en los datos proporcionados.
+"""
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1500
+        )
+        
+        contenido = response.choices[0].message.content
+        resultado = safe_json_parse(contenido)
+        
+        return jsonify({
+            "success": True,
+            "analisis": resultado
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+def analizar_postulacion_background(postulacion_id):
+    """Analiza una postulación en segundo plano y guarda el resultado"""
+    import time
+    print(f"🚀 INICIANDO ANÁLISIS EN SEGUNDO PLANO para postulación ID: {postulacion_id}")
+    time.sleep(2)
+    
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Obtener datos de la postulación
+        cursor.execute("""
+            SELECT 
+                p.id,
+                c.id as candidato_id,
+                c.raw_data as candidato_raw,
+                pu.id as puesto_id,
+                pu.titulo as puesto_titulo,
+                pu.cliente as puesto_cliente,
+                pu.descripcion as puesto_descripcion,
+                pu.requisitos as puesto_requisitos,
+                pu.habilidades_requeridas,
+                pu.seniority as puesto_seniority,
+                pu.responsabilidades,
+                pu.beneficios,
+                pu.sobre_empresa,
+                pu.modalidad
+            FROM postulaciones p
+            JOIN candidates c ON p.candidato_id = c.id
+            JOIN puestos_trabajo pu ON p.puesto_id = pu.id
+            WHERE p.id = %s
+        """, (postulacion_id,))
+        
+        postulacion = cursor.fetchone()
+        conn.close()
+        
+        if not postulacion:
+            print(f"❌ Postulación {postulacion_id} no encontrada")
+            return
+        
+        print(f"📊 Postulación encontrada: {postulacion['puesto_titulo']} - Candidato ID: {postulacion['candidato_id']}")
+        
+        # Parsear datos del candidato
+        candidato_data = postulacion['candidato_raw']
+        if isinstance(candidato_data, str):
+            candidato_data = json.loads(candidato_data)
+        
+        # Extraer información del candidato
+        dc = candidato_data.get('datos_crudos', {})
+        interp = candidato_data.get('interpretacion', {})
+        
+        print(f"📝 Analizando candidato: {dc.get('nombre', 'No disponible')}")
+        
+        # Construir prompt para evaluación profunda
+        prompt = f"""
+Actúa como un Headhunter Senior con 20 años de experiencia. Evalúa esta postulación.
+
+## 📋 REQUISITOS DEL PUESTO
+
+**Título:** {postulacion['puesto_titulo']}
+**Cliente:** {postulacion['puesto_cliente']}
+**Seniority requerido:** {postulacion['puesto_seniority'] or 'No especificado'}
+**Modalidad:** {postulacion['modalidad'] or 'No especificada'}
+
+**Descripción:**
+{postulacion['puesto_descripcion'] or 'No disponible'}
+
+**Requisitos:**
+{postulacion['puesto_requisitos'] or 'No especificados'}
+
+**Habilidades requeridas:**
+{', '.join(postulacion['habilidades_requeridas'] or [])}
+
+## 👤 PERFIL DEL CANDIDATO
+
+**Nombre:** {dc.get('nombre', 'No disponible')}
+**Profesión:** {dc.get('profesion_escrita', 'No disponible')}
+**Ubicación:** {dc.get('ubicacion', 'No disponible')}
+**Años experiencia:** {interp.get('anos_experiencia_deducidos', 'No disponible')}
+**Seniority detectado:** {interp.get('seniority', 'No disponible')}
+**Sector:** {interp.get('sector_deducido', 'No disponible')}
+
+**Empresas:**
+{', '.join(dc.get('empresas', [])) if dc.get('empresas') else 'No especificadas'}
+
+**Habilidades clave:**
+{', '.join(interp.get('habilidades_clave', [])) if interp.get('habilidades_clave') else 'No especificadas'}
+
+**Perfil interpretado:**
+{interp.get('perfil_interpretado', 'No disponible')}
+
+**Fortalezas:**
+{', '.join(interp.get('fortalezas', [])) if interp.get('fortalezas') else 'No especificadas'}
+
+## 🎯 TAREA
+
+Evalúa qué tan buen match es este candidato para el puesto. Devuelve SOLO JSON:
+
+{{
+  "score": 0-100,
+  "resumen": "resumen ejecutivo de 2-3 líneas",
+  "fortalezas": ["fortaleza1", "fortaleza2", "fortaleza3"],
+  "debilidades": ["debilidad1", "debilidad2"],
+  "habilidades_coincidentes": ["habilidad1", "habilidad2"],
+  "habilidades_faltantes": ["habilidad que el puesto requiere y el candidato no tiene"],
+  "analisis_experiencia": "comentario sobre su experiencia relevante",
+  "analisis_formacion": "comentario sobre su formación",
+  "recomendacion": "avanzar/entrevistar/descartar",
+  "confiabilidad": "Alta/Media/Baja",
+  "justificacion": "explicación detallada del score"
+}}
+"""
+        
+        print("🤖 Llamando a ChatGPT para análisis...")
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1500
+        )
+        
+        contenido = response.choices[0].message.content
+        resultado = safe_json_parse(contenido)
+        
+        print(f"📊 Resultado obtenido - Score: {resultado.get('score', 0)}")
+        
+        # Guardar análisis en la postulación
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE postulaciones 
+            SET match_score = %s, 
+                match_analisis = %s::jsonb,
+                estado = 'revisado'
+            WHERE id = %s
+        """, (resultado.get('score', 0), json.dumps(resultado, ensure_ascii=False), postulacion_id))
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Análisis COMPLETADO para postulación {postulacion_id} - Score: {resultado.get('score', 0)}")
+        
+    except Exception as e:
+        print(f"❌ Error analizando postulación {postulacion_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+@app.route("/api/admin/plantilla-v2/<int:plantilla_id>", methods=["GET"])
+def obtener_plantilla_v2(plantilla_id):
+    """Obtiene una plantilla específica por ID para edición"""
+    try:
+        print(f"🔍 Buscando plantilla ID: {plantilla_id}")
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Obtener datos de la plantilla
+        cursor.execute("""
+            SELECT 
+                id, nombre, tipo, descripcion, objetivo,
+                perfil_puesto, cultura_empresa, fase_config,
+                max_advertencias, intentos_por_pregunta, tiempo_instrucciones,
+                fecha_creacion
+            FROM plantillas_entrevista_v2
+            WHERE id = %s
+        """, (plantilla_id,))
+        
+        plantilla = cursor.fetchone()
+        
+        if not plantilla:
+            conn.close()
+            return jsonify({"success": False, "error": "Plantilla no encontrada"}), 404
+        
+        # Parsear JSONs si son strings
+        if plantilla['perfil_puesto'] and isinstance(plantilla['perfil_puesto'], str):
+            plantilla['perfil_puesto'] = json.loads(plantilla['perfil_puesto'])
+        if plantilla['cultura_empresa'] and isinstance(plantilla['cultura_empresa'], str):
+            plantilla['cultura_empresa'] = json.loads(plantilla['cultura_empresa'])
+        
+        # Obtener fase_config
+        fase_config = []
+        if plantilla['fase_config']:
+            if isinstance(plantilla['fase_config'], str):
+                fase_config = json.loads(plantilla['fase_config'])
+            else:
+                fase_config = plantilla['fase_config']
+        
+        # Obtener preguntas de la plantilla
+        cursor.execute("""
+            SELECT id, fase, pregunta, objetivo, criterio_star, competencia, peso, orden, tiempo_maximo
+            FROM preguntas_entrevista_v2
+            WHERE plantilla_id = %s
+            ORDER BY orden
+        """, (plantilla_id,))
+        
+        preguntas = cursor.fetchall()
+        conn.close()
+        
+        # Agrupar preguntas por fase
+        fases_dict = {}
+        for p in preguntas:
+            fase_nombre = p['fase'] or 'General'
+            if fase_nombre not in fases_dict:
+                # Buscar descripción de la fase desde fase_config
+                descripcion_fase = ''
+                for fase in fase_config:
+                    if fase.get('nombre') == fase_nombre:
+                        descripcion_fase = fase.get('descripcion', '')
+                        break
+                fases_dict[fase_nombre] = {
+                    'nombre': fase_nombre,
+                    'descripcion': descripcion_fase,
+                    'preguntas': []
+                }
+            fases_dict[fase_nombre]['preguntas'].append({
+                'pregunta': p['pregunta'],
+                'objetivo': p['objetivo'] or '',
+                'criterio_star': p['criterio_star'] or '',
+                'competencia': p['competencia'] or '',
+                'peso': p['peso'] or 1
+            })
+        
+        plantilla['fases'] = list(fases_dict.values())
+        
+        print(f"✅ Plantilla encontrada: {plantilla['nombre']}")
+        
+        return jsonify({"success": True, "plantilla": plantilla})
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+
+codigos_verificacion = {}
+
+@app.route("/api/auth/send-code", methods=["POST"])
+def send_auth_code():
+    """Envía código de verificación por correo usando email_service"""
+    try:
+        data = request.json
+        email = data.get('email')
+        
+        if not email:
+            return jsonify({"success": False, "error": "Email requerido"}), 400
+        
+        # Verificar si el usuario existe (opcional, puedes crear usuarios automáticamente)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM usuarios WHERE email = %s", (email,))
+        usuario = cursor.fetchone()
+        conn.close()
+        
+        # Si no existe, crear usuario automáticamente
+        if not usuario:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO usuarios (email, nombre, rol, activo) 
+                VALUES (%s, %s, 'reclutador', TRUE)
+                ON CONFLICT (email) DO NOTHING
+            """, (email, email.split('@')[0]))
+            conn.commit()
+            conn.close()
+            print(f"✅ Usuario creado automáticamente: {email}")
+        
+        # Generar código de 6 dígitos
+        codigo = f"{secrets.randbelow(900000) + 100000}"
+        
+        # Guardar código
+        codigos_verificacion[email] = {
+            'code': codigo,
+            'expires': datetime.now().timestamp() + 300  # 5 minutos
+        }
+        
+        # Usar tu infraestructura de correos existente
+        from email_service import mailer
+        
+        subject = "🔐 Código de acceso - Talent Pipeline"
+        body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 16px;">
+                <h2 style="color: white; margin: 0;">🎯 Talent Pipeline</h2>
+                <p style="color: #e0e7ff; margin-top: 8px;">Código de acceso</p>
+            </div>
+            <div style="background: #f8fafc; padding: 30px; border-radius: 16px; margin-top: 16px;">
+                <p style="color: #334155;">Hola,</p>
+                <p style="color: #334155;">Has solicitado acceder al sistema. Usa el siguiente código:</p>
+                <div style="background: white; padding: 20px; text-align: center; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0;">
+                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #667eea;">{codigo}</span>
+                </div>
+                <p style="color: #64748b; font-size: 12px;">Este código expirará en 5 minutos.</p>
+                <hr style="margin: 20px 0; border-color: #e2e8f0;">
+                <p style="color: #94a3b8; font-size: 11px;">Si no solicitaste este acceso, ignora este mensaje.</p>
+            </div>
+        </div>
+        """
+        
+        # Enviar correo usando tu servicio existente
+        result = mailer.send_email_sync(email, subject, body, is_html=True)
+        
+        if result.get('success'):
+            print(f"✅ Código enviado a {email}: {codigo}")
+            return jsonify({"success": True, "message": "Código enviado a tu correo"})
+        else:
+            print(f"❌ Error enviando correo: {result.get('error')}")
+            return jsonify({"success": False, "error": "Error al enviar el código. Intenta de nuevo."}), 500
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/auth/verify-code", methods=["POST"])
+def verify_auth_code():
+    """Verifica el código ingresado"""
+    try:
+        data = request.json
+        email = data.get('email')
+        code = data.get('code')
+        
+        if not email or not code:
+            return jsonify({"success": False, "error": "Email y código requeridos"}), 400
+        
+        # Verificar código
+        registro = codigos_verificacion.get(email)
+        if not registro:
+            return jsonify({"success": False, "error": "Código no encontrado. Solicita uno nuevo."}), 400
+        
+        if datetime.now().timestamp() > registro['expires']:
+            del codigos_verificacion[email]
+            return jsonify({"success": False, "error": "El código ha expirado. Solicita uno nuevo."}), 400
+        
+        if registro['code'] != code:
+            return jsonify({"success": False, "error": "Código incorrecto"}), 400
+        
+        # Limpiar código usado
+        del codigos_verificacion[email]
+        
+        # Obtener usuario de la BD
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT id, email, nombre, rol FROM usuarios WHERE email = %s", (email,))
+        usuario = cursor.fetchone()
+        conn.close()
+        
+        # Actualizar último acceso
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE usuarios SET ultimo_acceso = NOW() WHERE email = %s", (email,))
+        conn.commit()
+        conn.close()
+        
+        # Generar token JWT
+        token = jwt.encode({
+            'user_id': usuario['id'],
+            'email': usuario['email'],
+            'nombre': usuario['nombre'],
+            'rol': usuario['rol'],
+            'exp': datetime.utcnow() + timedelta(hours=8)
+        }, app.config['SECRET_KEY'], algorithm='HS256')
+        
+        return jsonify({
+            "success": True, 
+            "token": token,
+            "user": {
+                "id": usuario['id'],
+                "email": usuario['email'],
+                "nombre": usuario['nombre'],
+                "rol": usuario['rol']
+            },
+            "message": "Acceso concedido"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/auth/verify-token", methods=["GET"])
+def verify_token():
+    """Verifica si el token es válido"""
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"success": False}), 401
+        
+        token = auth_header.split(' ')[1]
+        payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        
+        return jsonify({"success": True, "user": payload})
+        
+    except jwt.ExpiredSignatureError:
+        return jsonify({"success": False, "error": "Token expirado"}), 401
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 401
+
+@app.route("/dashboard")
+def dashboard():
+    from flask import redirect
+    return redirect("http://localhost:3000")
 
 
 # =====================================================

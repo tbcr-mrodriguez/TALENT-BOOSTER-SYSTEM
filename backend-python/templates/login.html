@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talent Pipeline · Acceso</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-shadow {
+            box-shadow: 0 20px 35px -8px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+        .input-focus:focus {
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #667eea;
+            outline: none;
+        }
+        .otp-input {
+            width: 56px;
+            height: 64px;
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: 600;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            transition: all 0.2s;
+        }
+        .otp-input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            outline: none;
+        }
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen flex items-center justify-center px-4 py-12">
+        <div class="max-w-md w-full">
+            <!-- Logo y título -->
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 gradient-bg rounded-2xl shadow-lg mb-4">
+                    <span class="text-3xl">🎯</span>
+                </div>
+                <h2 class="text-3xl font-bold text-gray-900">Talent Pipeline</h2>
+                <p class="text-gray-500 mt-2">Sistema inteligente de reclutamiento</p>
+            </div>
+
+            <!-- Card principal -->
+            <div class="bg-white rounded-2xl card-shadow p-8">
+                <!-- Paso 1: Email -->
+                <div id="step-email">
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Correo electrónico</label>
+                        <input type="email" id="email-input" class="w-full px-4 py-3 border border-gray-200 rounded-xl input-focus" placeholder="tu@empresa.com" autocomplete="off">
+                    </div>
+                    <button id="btn-send-code" class="w-full gradient-bg text-white py-3 rounded-xl font-semibold hover:opacity-90 transition">
+                        Enviar código de acceso
+                    </button>
+                    <p class="text-xs text-gray-400 text-center mt-4">
+                        Te enviaremos un código de 6 dígitos a tu correo
+                    </p>
+                </div>
+
+                <!-- Paso 2: Código OTP -->
+                <div id="step-otp" style="display: none;">
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Código de verificación</label>
+                        <div class="flex justify-center gap-3" id="otp-group">
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="0" autofocus>
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="1">
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="2">
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="3">
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="4">
+                            <input type="text" maxlength="1" class="otp-input otp-digit text-center" data-index="5">
+                        </div>
+                        <p class="text-xs text-gray-400 text-center mt-3" id="timer-text"></p>
+                    </div>
+                    <button id="btn-verify-code" class="w-full gradient-bg text-white py-3 rounded-xl font-semibold hover:opacity-90 transition">
+                        Verificar acceso
+                    </button>
+                    <button id="btn-back-email" class="w-full mt-3 text-gray-500 py-2 rounded-xl text-sm hover:text-gray-700 transition">
+                        ← Usar otro correo
+                    </button>
+                </div>
+
+                <!-- Mensajes -->
+                <div id="message-container" class="mt-4"></div>
+            </div>
+
+            <!-- Footer -->
+            <p class="text-center text-xs text-gray-400 mt-8">
+                Sistema seguro · Acceso mediante código de un solo uso
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin + '/api';
+        let emailEnviado = '';
+        let timerInterval = null;
+
+        const stepEmail = document.getElementById('step-email');
+        const stepOtp = document.getElementById('step-otp');
+        const btnSendCode = document.getElementById('btn-send-code');
+        const btnVerifyCode = document.getElementById('btn-verify-code');
+        const btnBackEmail = document.getElementById('btn-back-email');
+        const emailInput = document.getElementById('email-input');
+        const messageContainer = document.getElementById('message-container');
+        const timerText = document.getElementById('timer-text');
+        const otpInputs = document.querySelectorAll('.otp-digit');
+
+        function mostrarMensaje(mensaje, tipo = 'error') {
+            const bg = tipo === 'success' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200';
+            messageContainer.innerHTML = `<div class="${bg} border rounded-xl p-3 text-sm text-center">${mensaje}</div>`;
+            setTimeout(() => { if (messageContainer.innerHTML.includes(mensaje)) messageContainer.innerHTML = ''; }, 5000);
+        }
+
+        function mostrarLoading(btn, loading) {
+            if (loading) {
+                btn.dataset.originalText = btn.textContent;
+                btn.innerHTML = '<span class="spinner"></span>';
+                btn.disabled = true;
+            } else {
+                btn.textContent = btn.dataset.originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function iniciarTimer(segundos) {
+            if (timerInterval) clearInterval(timerInterval);
+            let tiempo = segundos;
+            const interval = setInterval(() => {
+                tiempo--;
+                if (tiempo > 0) {
+                    timerText.innerHTML = `⏱️ Reenviar código en ${tiempo} segundos`;
+                } else {
+                    clearInterval(interval);
+                    timerText.innerHTML = `<button id="btn-resend-code" class="text-indigo-600 hover:text-indigo-800 underline">🔄 Reenviar código</button>`;
+                    document.getElementById('btn-resend-code')?.addEventListener('click', () => enviarCodigo(true));
+                }
+            }, 1000);
+            timerInterval = interval;
+        }
+
+        otpInputs.forEach((input, idx) => {
+            input.addEventListener('input', (e) => {
+                if (e.target.value.length === 1 && idx < 5) otpInputs[idx + 1].focus();
+            });
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace' && !e.target.value && idx > 0) otpInputs[idx - 1].focus();
+            });
+        });
+
+        function obtenerCodigo() { return Array.from(otpInputs).map(i => i.value).join(''); }
+        function limpiarOtp() { otpInputs.forEach(i => i.value = ''); if (otpInputs[0]) otpInputs[0].focus(); }
+
+        async function enviarCodigo() {
+            const email = emailInput.value.trim();
+            if (!email || !email.includes('@')) {
+                mostrarMensaje('❌ Ingresa un correo electrónico válido', 'error');
+                return;
+            }
+            mostrarLoading(btnSendCode, true);
+            try {
+                const res = await fetch(`${API_URL}/auth/send-code`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    emailEnviado = email;
+                    mostrarMensaje('✅ Código enviado a tu correo', 'success');
+                    stepEmail.style.display = 'none';
+                    stepOtp.style.display = 'block';
+                    limpiarOtp();
+                    iniciarTimer(60);
+                } else {
+                    mostrarMensaje('❌ ' + (data.error || 'Error al enviar'), 'error');
+                }
+            } catch (error) {
+                mostrarMensaje('❌ Error de conexión', 'error');
+            } finally {
+                mostrarLoading(btnSendCode, false);
+            }
+        }
+
+        async function verificarCodigo() {
+            const codigo = obtenerCodigo();
+            if (codigo.length !== 6) {
+                mostrarMensaje('❌ Ingresa el código de 6 dígitos', 'error');
+                return;
+            }
+            mostrarLoading(btnVerifyCode, true);
+            try {
+                const res = await fetch(`${API_URL}/auth/verify-code`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: emailEnviado, code: codigo })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mostrarMensaje('✅ Acceso concedido. Redirigiendo...', 'success');
+                    if (data.token) localStorage.setItem('auth_token', data.token);
+                    if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 1000);
+                } else {
+                    mostrarMensaje('❌ ' + (data.error || 'Código incorrecto'), 'error');
+                }
+            } catch (error) {
+                mostrarMensaje('❌ Error de conexión', 'error');
+            } finally {
+                mostrarLoading(btnVerifyCode, false);
+            }
+        }
+
+        function volverAEmail() {
+            if (timerInterval) clearInterval(timerInterval);
+            stepOtp.style.display = 'none';
+            stepEmail.style.display = 'block';
+            emailInput.value = emailEnviado;
+        }
+
+        btnSendCode.onclick = enviarCodigo;
+        btnVerifyCode.onclick = verificarCodigo;
+        btnBackEmail.onclick = volverAEmail;
+        emailInput.addEventListener('keypress', (e) => e.key === 'Enter' && enviarCodigo());
+        if (otpInputs[5]) otpInputs[5].addEventListener('keypress', (e) => e.key === 'Enter' && verificarCodigo());
+
+        // Verificar sesión existente
+        async function checkSession() {
+            const token = localStorage.getItem('auth_token');
+            if (token) {
+                try {
+                    const res = await fetch(`${API_URL}/auth/verify-token`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (res.ok) {
+                        window.location.href = '/dashboard';
+                    }
+                } catch (e) {
+                    console.log('Sesión no válida');
+                }
+            }
+        }
+        checkSession();
+    </script>
+</body>
+</html>
