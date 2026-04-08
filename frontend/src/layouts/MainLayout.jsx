@@ -11,8 +11,11 @@ import {
   Briefcase, 
   Settings,
   Menu,
-  X
+  X,
+  FileText
 } from 'lucide-react';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
 const menuItems = [
   { path: '/talento', icon: Users, label: 'Pipeline de Talento' },
@@ -20,11 +23,19 @@ const menuItems = [
   { path: '/busqueda-ia', icon: Search, label: 'Búsqueda IA' },
   { path: '/ai-match', icon: Brain, label: 'AI Match' },
   { path: '/headhunter', icon: MessageSquare, label: 'Headhunter IA' },
-  { path: '/entrevistas', icon: Video, label: 'Entrevistas' },
+  { path: '/entrevistas', icon: Video, label: 'Configuración Entrevistas' },
+  { path: '/resultados-entrevistas', icon: FileText, label: 'Resultados Entrevistas' },
   { path: '/correos', icon: Mail, label: 'Correos' },
   { path: '/reclutamiento', icon: Briefcase, label: 'Reclutamiento' },
-  { path: '/configuracion', icon: Settings, label: 'Configuración' },
+  { path: '/admin-empleos', icon: Settings, label: 'Admin Empleos' },
+  { path: '/configuracion', icon: Settings, label: 'Configuración' }
 ];
+
+const portalItem = { 
+  path: `${API_BASE_URL}/candidatos-portal.html`, 
+  icon: Briefcase, 
+  label: 'Portal del Candidato' 
+};
 
 const MainLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -98,6 +109,43 @@ const MainLayout = () => {
               </Link>
             );
           })}
+
+          {/* Separador */}
+          <div style={{
+            height: '1px',
+            background: '#e2e8f0',
+            margin: '12px 0'
+          }} />
+
+          {/* Portal del Candidato */}
+          <a
+            href={portalItem.path}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '10px 12px',
+              marginBottom: '4px',
+              borderRadius: '10px',
+              background: 'transparent',
+              color: '#475569',
+              textDecoration: 'none',
+              fontSize: '0.875rem',
+              fontWeight: 400,
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f1f5f9';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <portalItem.icon size={20} />
+            {sidebarOpen && <span>{portalItem.label}</span>}
+          </a>
         </nav>
       </div>
 

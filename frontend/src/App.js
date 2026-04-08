@@ -1,7 +1,15 @@
+
 import React from 'react';
+import AIMatch from './pages/AIMatch';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import TalentoPipeline from './pages/TalentoPipeline';
+import KanbanReclutamiento from './pages/KanbanReclutamiento';
+import AdminEmpleos from './pages/AdminEmpleos';
+import AdminEntrevistas from './pages/AdminEntrevistas';
+import EntrevistasDashboard from './components/EntrevistasDashboard';
+import HeadhunterIA from './pages/HeadhunterIA';
+import Dashboard from './pages/Dashboard';
 
 // Placeholder para páginas que aún no hemos migrado
 const Placeholder = ({ title }) => (
@@ -18,14 +26,16 @@ function App() {
         <Route path="/" element={<MainLayout />}>
           <Route index element={<TalentoPipeline />} />
           <Route path="talento" element={<TalentoPipeline />} />
-          <Route path="dashboard" element={<Placeholder title="Dashboard" />} />
+          <Route path="dashboard" element={<Dashboard />} />
           <Route path="busqueda-ia" element={<Placeholder title="Búsqueda IA" />} />
-          <Route path="ai-match" element={<Placeholder title="AI Match" />} />
-          <Route path="headhunter" element={<Placeholder title="Headhunter IA" />} />
-          <Route path="entrevistas" element={<Placeholder title="Entrevistas" />} />
+          <Route path="ai-match" element={<AIMatch />} />
+          <Route path="headhunter" element={<HeadhunterIA />} />
+          <Route path="entrevistas" element={<AdminEntrevistas />} />
           <Route path="correos" element={<Placeholder title="Correos" />} />
-          <Route path="reclutamiento" element={<Placeholder title="Reclutamiento" />} />
+          <Route path="reclutamiento" element={<KanbanReclutamiento />} />
+          <Route path="admin-empleos" element={<AdminEmpleos />} />
           <Route path="configuracion" element={<Placeholder title="Configuración" />} />
+          <Route path="resultados-entrevistas" element={<EntrevistasDashboard />} />
         </Route>
       </Routes>
     </BrowserRouter>

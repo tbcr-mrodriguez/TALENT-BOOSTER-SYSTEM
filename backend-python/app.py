@@ -76,10 +76,11 @@ app.config['SECRET_KEY'] = SECRET_KEY
 def add_security_headers(response):
     # Headers OWASP recomendados
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
+    # Eliminamos X-Frame-Options porque usamos CSP
+    # response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    response.headers['Content-Security-Policy'] = "default-src 'self' http://localhost:3000 http://localhost:5001; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5001 http://localhost:3000;"
+    response.headers['Content-Security-Policy'] = "default-src 'self' http://localhost:3000 http://localhost:5001; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://code.jquery.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src 'self' http://localhost:5001 http://localhost:3000; frame-src 'self' http://localhost:5001;"
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'camera=(self), microphone=(self), geolocation=()'
     
@@ -159,14 +160,7 @@ if ENVIRONMENT == 'production':
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_urlsafe(32))
 
-# Headers de seguridad OWASP
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-    return response
+
 
 
 # Configuración CORS segura
@@ -4931,6 +4925,134 @@ def api_obtener_auditoria():
         
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/dashboard", methods=["GET"])
+@limiter.limit("30 per minute")
+def get_dashboard_data():
+    """Obtiene todos los datos para el dashboard"""
+    try:
+        # Obtener periodo de los parámetros de la consulta
+        periodo = request.args.get('periodo', '6')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # 1. Total candidatos
+        cursor.execute("SELECT COUNT(*) as total FROM candidates")
+        total_candidatos = cursor.fetchone()['total']
+        
+        # 2. Total entrevistas
+        cursor.execute("SELECT COUNT(*) as total FROM entrevistas")
+        total_entrevistas = cursor.fetchone()['total']
+        
+        # 3. Total puestos activos
+        cursor.execute("SELECT COUNT(*) as total FROM puestos_trabajo WHERE activo = true")
+        total_puestos = cursor.fetchone()['total']
+        
+        # 4. Match promedio de postulaciones
+        cursor.execute("SELECT AVG(match_score) as promedio FROM postulaciones WHERE match_score IS NOT NULL")
+        match_promedio = cursor.fetchone()['promedio'] or 0
+        
+        # 5. Candidatos por seniority
+        cursor.execute("""
+            SELECT 
+                COALESCE(raw_data->'interpretacion'->>'seniority', 'No determinado') as seniority,
+                COUNT(*) as cantidad
+            FROM candidates
+            GROUP BY seniority
+            ORDER BY cantidad DESC
+        """)
+        candidatos_por_seniority = [{'name': r['seniority'], 'value': r['cantidad']} for r in cursor.fetchall()]
+        
+        # 6. Candidatos por sector
+        cursor.execute("""
+            SELECT 
+                COALESCE(sector_principal, 'No especificado') as sector,
+                COUNT(*) as cantidad
+            FROM candidates
+            WHERE sector_principal IS NOT NULL
+            GROUP BY sector
+            ORDER BY cantidad DESC
+            LIMIT 8
+        """)
+        candidatos_por_sector = [{'name': r['sector'], 'value': r['cantidad']} for r in cursor.fetchall()]
+        
+        # 7. Entrevistas por estado
+        cursor.execute("""
+            SELECT 
+                estado,
+                COUNT(*) as cantidad
+            FROM entrevistas
+            GROUP BY estado
+            ORDER BY cantidad DESC
+        """)
+        entrevistas_por_estado = [{'name': r['estado'], 'value': r['cantidad']} for r in cursor.fetchall()]
+        
+        # 8. Candidatos por etapa de reclutamiento
+        cursor.execute("""
+            SELECT 
+                e.nombre as etapa,
+                COUNT(cp.id) as cantidad
+            FROM etapas_reclutamiento e
+            LEFT JOIN candidatos_proceso cp ON cp.etapa_id = e.id
+            WHERE e.activo = true
+            GROUP BY e.id, e.nombre, e.orden
+            ORDER BY e.orden
+        """)
+        candidatos_por_etapa = [{'nombre': r['etapa'], 'cantidad': r['cantidad']} for r in cursor.fetchall()]
+        
+        # 9. Últimos 5 candidatos
+        cursor.execute("""
+            SELECT 
+                id,
+                COALESCE(nombre, 'No especificado') as nombre,
+                COALESCE(profesion, 'No especificada') as profesion,
+                COALESCE(raw_data->'interpretacion'->>'seniority', 'No especificado') as seniority,
+                COALESCE(score, 0) as score,
+                fecha_analisis as fecha
+            FROM candidates
+            ORDER BY fecha_analisis DESC
+            LIMIT 5
+        """)
+        ultimos_candidatos = [dict(r) for r in cursor.fetchall()]
+        
+        # 10. Postulaciones por mes (usando el periodo)
+        cursor.execute("""
+            SELECT 
+        TO_CHAR(fecha_postulacion, 'YYYY-MM') as mes,
+        COUNT(*) as cantidad
+    FROM postulaciones
+    WHERE fecha_postulacion >= NOW() - (INTERVAL '1 month' * %s)
+    GROUP BY TO_CHAR(fecha_postulacion, 'YYYY-MM')
+    ORDER BY mes
+""", (int(periodo),))
+        postulaciones_por_mes = [{'mes': r['mes'], 'cantidad': r['cantidad']} for r in cursor.fetchall()]
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "data": {
+                "totalCandidatos": total_candidatos,
+                "totalEntrevistas": total_entrevistas,
+                "totalPuestosActivos": total_puestos,
+                "matchPromedio": round(match_promedio, 1),
+                "candidatosPorSeniority": candidatos_por_seniority,
+                "candidatosPorSector": candidatos_por_sector,
+                "entrevistasPorEstado": entrevistas_por_estado,
+                "candidatosPorEtapa": candidatos_por_etapa,
+                "ultimosCandidatos": ultimos_candidatos,
+                "postulacionesPorMes": postulaciones_por_mes
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error en dashboard: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # =====================================================
 # INICIO
