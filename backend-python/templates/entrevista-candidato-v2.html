@@ -533,7 +533,6 @@
             <div class="btn-group">
                 <button id="btnContinuarTest" class="btn btn-primary" style="flex: 1;" disabled>✅ Continuar</button>
                 <button id="btnReintentarTest" class="btn btn-outline" style="flex: 1;">🔄 Reintentar</button>
-                <button id="btnSiguiente" class="btn btn-success" style="display: none;">➡️ Siguiente pregunta</button>
             </div>
         </div>
     </div>
@@ -664,7 +663,11 @@
                         <button id="btnRepetir" class="btn btn-outline" style="display: none;">🔄 Repetir pregunta</button>
                         <button id="btnTexto" class="btn btn-outline" style="display: none;">⌨️ Responder por texto</button>
                         <button id="btnCancelar" class="btn btn-outline" style="display: none;">❌ Cancelar</button>
-                        
+                    </div>
+                    
+                    <!-- ✅ BOTÓN SIGUIENTE - AHORA EN EL LUGAR CORRECTO ✅ -->
+                    <div class="btn-group">
+                        <button id="btnSiguiente" class="btn btn-success" style="display: none;">➡️ Siguiente pregunta</button>
                     </div>
                     
                     <!-- Área de respuesta por texto -->
@@ -1070,6 +1073,8 @@
             if (preguntaInfo) preguntaInfo.textContent = `Pregunta ${index + 1} de ${preguntas.length}`;
             if (preguntasRestantesSpan) preguntasRestantesSpan.textContent = `Preguntas restantes: ${preguntas.length - index - 1}`;
             if (progresoBar) progresoBar.style.width = `${((index + 1) / preguntas.length) * 100}%`;
+            
+            // Ocultar botón siguiente al mostrar nueva pregunta
             if (btnSiguiente) btnSiguiente.style.display = 'none';
             
             intentosActual = 0;
@@ -1212,33 +1217,32 @@
             }
         }
         
-
         function detenerGrabacion() {
-    if (recorder && recorder.state !== 'inactive') {
-        recorder.stop();
-        estaGrabando = false;
-        estaPausado = false;
-        actualizarEstadoUI('processing');
-        
-        if (btnGrabar) btnGrabar.style.display = 'none';
-        if (btnPausar) btnPausar.style.display = 'none';
-        if (btnDetener) btnDetener.style.display = 'none';
-        if (recordingIndicator) recordingIndicator.style.display = 'none';
-        if (btnCancelar) btnCancelar.style.display = 'none';
-        
-        // ✅ Mostrar botón Siguiente SIEMPRE después de grabar
-        if (btnSiguiente) btnSiguiente.style.display = 'block';
-        
-        // Mostrar botón Repetir solo si quedan intentos
-        if (intentosActual + 1 < intentosPermitidos && puedeRepetir) {
-            if (btnRepetir) btnRepetir.style.display = 'block';
-            if (feedbackMensaje) feedbackMensaje.textContent = `✅ Respuesta guardada. Tienes ${intentosPermitidos - intentosActual - 1} intento(s) restante(s).`;
-        } else {
-            if (feedbackMensaje) feedbackMensaje.textContent = '✅ Respuesta guardada.';
+            if (recorder && recorder.state !== 'inactive') {
+                recorder.stop();
+                estaGrabando = false;
+                estaPausado = false;
+                actualizarEstadoUI('processing');
+                
+                if (btnGrabar) btnGrabar.style.display = 'none';
+                if (btnPausar) btnPausar.style.display = 'none';
+                if (btnDetener) btnDetener.style.display = 'none';
+                if (recordingIndicator) recordingIndicator.style.display = 'none';
+                if (btnCancelar) btnCancelar.style.display = 'none';
+                
+                // ✅ Mostrar botón Siguiente después de grabar
+                if (btnSiguiente) btnSiguiente.style.display = 'block';
+                
+                // Mostrar botón Repetir solo si quedan intentos
+                if (intentosActual + 1 < intentosPermitidos && puedeRepetir) {
+                    if (btnRepetir) btnRepetir.style.display = 'block';
+                    if (feedbackMensaje) feedbackMensaje.textContent = `✅ Respuesta guardada. Tienes ${intentosPermitidos - intentosActual - 1} intento(s) restante(s).`;
+                } else {
+                    if (feedbackMensaje) feedbackMensaje.textContent = '✅ Respuesta guardada.';
+                }
+            }
         }
-    }
-}
-       
+        
         function cancelarGrabacion() {
             if (recorder && recorder.state !== 'inactive') {
                 recorder.onstop = null;
@@ -1275,8 +1279,8 @@
                 if (btnGrabar) btnGrabar.style.display = 'block';
                 if (btnGrabar) btnGrabar.textContent = '🎤 Comenzar';
             }, 1000);
-        }    
-            
+        }
+        
         function mostrarRespuestaTexto() {
             if (textResponseArea) textResponseArea.style.display = 'block';
             if (btnTexto) btnTexto.style.display = 'none';

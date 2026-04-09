@@ -4089,9 +4089,9 @@ def api_postular():
                 pregunta_id = key.replace('respuesta_', '')
                 respuestas[pregunta_id] = value
         
-        # Procesar CV si se subió
+        # ✅ Guardar archivo TEMPORALMENTE (sin procesar)
         cv_filename = None
-        candidate_id = None
+        cv_temp_path = None
         
         if 'cv' in request.files:
             cv_file = request.files['cv']
@@ -4100,35 +4100,14 @@ def api_postular():
                 cv_filename = f"candidato_{timestamp}_{secure_filename(cv_file.filename)}"
                 cv_path = os.path.join(UPLOAD_FOLDER, cv_filename)
                 cv_file.save(cv_path)
-                
-                # Extraer texto del CV
-                text = extract_text(cv_path)
-                
-                if text and len(text) > 50:
-                    # Analizar CV con IA
-                    data = analyze_cv(text, "gpt")
-                    data = normalize_lists(data)
-                    data = score_candidate(data)
-                    data["archivo"] = cv_filename
-                    data["fecha_analisis"] = datetime.now().isoformat()
-                    
-                    # Guardar en la tabla candidates
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    cursor.callproc('crear_candidato', [cv_filename, json.dumps(data, ensure_ascii=False)])
-                    candidate_id = cursor.fetchone()[0]
-                    conn.commit()
-                    conn.close()
-                    
-                    # Generar embedding
-                    generar_embedding_candidato(data, candidate_id)
-                    
-                    print(f"✅ Candidato guardado con ID: {candidate_id}")
+                cv_temp_path = cv_path  # Guardar para procesar en background
         
-        # Buscar candidato por email si no se creó uno nuevo
-        if not candidate_id and email:
-            conn = get_db_connection()
-            cursor = conn.cursor()
+        # ✅ Buscar candidato por email (rápido, solo consulta DB)
+        candidate_id = None
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if email:
             cursor.execute("""
                 SELECT c.id FROM candidates c
                 WHERE c.raw_data::jsonb->'datos_crudos'->>'email' = %s
@@ -4137,25 +4116,37 @@ def api_postular():
             row = cursor.fetchone()
             if row:
                 candidate_id = row[0]
-            conn.close()
         
-        # Verificar si ya postuló a este puesto
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        if candidate_id:
+        # ✅ Si no existe, crear candidato MÍNIMO (solo metadatos)
+        if not candidate_id:
             cursor.execute("""
-                SELECT 1 FROM postulaciones 
-                WHERE candidato_id = %s AND puesto_id = %s
-            """, (candidate_id, puesto_id))
-            if cursor.fetchone():
-                conn.close()
-                return jsonify({
-                    "success": False, 
-                    "error": "Ya has postulado a este puesto anteriormente"
-                })
+                INSERT INTO candidates (archivo, nombre, raw_data, fecha_analisis)
+                VALUES (%s, %s, %s, NOW())
+                RETURNING id
+            """, (cv_filename, nombre, json.dumps({
+                "datos_crudos": {
+                    "nombre": nombre,
+                    "email": email,
+                    "telefono": telefono
+                },
+                "archivo": cv_filename,
+                "estado_procesamiento": "pendiente"  # ← Nuevo campo para saber que falta analizar
+            })))
+            candidate_id = cursor.fetchone()[0]
         
-        # Crear postulación
+        # ✅ Verificar postulación duplicada (rápido)
+        cursor.execute("""
+            SELECT 1 FROM postulaciones 
+            WHERE candidato_id = %s AND puesto_id = %s
+        """, (candidate_id, puesto_id))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "Ya has postulado a este puesto anteriormente"
+            })
+        
+        # ✅ Crear postulación (rápido)
         cursor.execute("""
             INSERT INTO postulaciones (candidato_id, puesto_id, respuestas_formulario, cv_filename, estado)
             VALUES (%s, %s, %s, %s, 'pendiente')
@@ -4166,15 +4157,22 @@ def api_postular():
         conn.commit()
         conn.close()
         
-        # 🔥 DISPARAR ANÁLISIS EN SEGUNDO PLANO (no esperar respuesta)
+        # 🔥 DISPARAR PROCESAMIENTO COMPLETO EN SEGUNDO PLANO
+        # Incluyendo: extraer texto del CV, llamar a GPT, generar embeddings, etc.
         import threading
-        thread = threading.Thread(target=analizar_postulacion_background, args=(postulacion_id,))
+        thread = threading.Thread(
+            target=procesar_postulacion_completa_background,
+            args=(postulacion_id, candidate_id, cv_temp_path, email, nombre, telefono)
+        )
         thread.daemon = True
         thread.start()
+
+        print(f"✅ Thread iniciado para postulación {postulacion_id}")
         
+        # ✅ Respuesta inmediata (menos de 1 segundo)
         return jsonify({
             "success": True,
-            "message": "Postulación recibida exitosamente. El equipo evaluará tu perfil.",
+            "message": "Postulación recibida exitosamente. Estamos analizando tu CV, te notificaremos por correo cuando esté listo.",
             "postulacion_id": postulacion_id
         })
         
@@ -4183,6 +4181,615 @@ def api_postular():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+    
+def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_path, email, nombre, telefono):
+    """Procesa la postulación en segundo plano - extrae CV, analiza con IA, genera embedding"""
+    import time
+    
+    print("=" * 70)
+    print(f"🔥🔥🔥 [BACKGROUND] INICIANDO PROCESAMIENTO 🔥🔥🔥")
+    print(f"📌 Postulación ID: {postulacion_id}")
+    print(f"📌 Candidato ID: {candidate_id}")
+    print(f"📌 Nombre: {nombre}")
+    print(f"📌 Email: {email}")
+    print(f"📌 CV Path: {cv_path}")
+    print("=" * 70)
+    
+    try:
+        # ===== PASO 1: Marcar postulación como 'procesando' =====
+        print("[1/6] Actualizando estado a 'procesando'...")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE postulaciones 
+            SET estado = 'procesando' 
+            WHERE id = %s
+        """, (postulacion_id,))
+        conn.commit()
+        conn.close()
+        print("✅ [1/6] Estado actualizado a 'procesando'")
+        
+        # ===== PASO 2: Extraer texto del CV =====
+        texto_cv = ""
+        if cv_path and os.path.exists(cv_path):
+            print(f"[2/6] Extrayendo texto del CV: {cv_path}")
+            texto_cv = extract_text(cv_path)
+            print(f"✅ [2/6] Texto extraído: {len(texto_cv)} caracteres")
+        else:
+            print(f"⚠️ [2/6] No hay CV para procesar en: {cv_path}")
+        
+        # ===== PASO 3: Analizar CV con IA (si hay texto suficiente) =====
+        datos_actualizados = None
+        
+        if texto_cv and len(texto_cv) > 100:
+            print("[3/6] Analizando CV con IA (esto toma 5-10 segundos)...")
+            try:
+                datos_actualizados = analyze_cv(texto_cv, "gpt")
+                datos_actualizados = normalize_lists(datos_actualizados)
+                datos_actualizados = score_candidate(datos_actualizados)
+                datos_actualizados["archivo"] = os.path.basename(cv_path) if cv_path else None
+                datos_actualizados["fecha_analisis"] = datetime.now().isoformat()
+                datos_actualizados["estado_procesamiento"] = "completado"
+                print(f"✅ [3/6] Análisis IA completado. Score: {datos_actualizados.get('score', 0)}")
+            except Exception as e:
+                print(f"❌ [3/6] Error en IA: {e}")
+                datos_actualizados = {
+                    "datos_crudos": {
+                        "nombre": nombre,
+                        "email": email,
+                        "telefono": telefono
+                    },
+                    "interpretacion": {},
+                    "estado_procesamiento": "error_ia",
+                    "archivo": os.path.basename(cv_path) if cv_path else None
+                }
+        else:
+            print(f"⚠️ [3/6] Texto insuficiente ({len(texto_cv)} chars), saltando análisis IA")
+            datos_actualizados = {
+                "datos_crudos": {
+                    "nombre": nombre,
+                    "email": email,
+                    "telefono": telefono
+                },
+                "interpretacion": {},
+                "estado_procesamiento": "sin_texto_suficiente",
+                "archivo": os.path.basename(cv_path) if cv_path else None
+            }
+        
+        # ===== PASO 4: Actualizar candidato en BD =====
+        print("[4/6] Actualizando candidato en BD...")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Obtener profesión del análisis
+        profesion = ""
+        if datos_actualizados.get('datos_crudos'):
+            profesion = datos_actualizados['datos_crudos'].get('profesion_escrita', '')
+        
+        cursor.execute("""
+            UPDATE candidates 
+            SET raw_data = %s::jsonb, 
+                nombre = %s,
+                profesion = %s,
+                fecha_analisis = NOW()
+            WHERE id = %s
+        """, (
+            json.dumps(datos_actualizados, ensure_ascii=False),
+            datos_actualizados.get('datos_crudos', {}).get('nombre', nombre),
+            profesion,
+            candidate_id
+        ))
+        conn.commit()
+        conn.close()
+        print("✅ [4/6] Candidato actualizado")
+        
+        # ===== PASO 5: Generar embedding para búsqueda semántica =====
+        print("[5/6] Generando embedding para búsqueda semántica...")
+        try:
+            generar_embedding_candidato(datos_actualizados, candidate_id)
+            print("✅ [5/6] Embedding generado correctamente")
+        except Exception as e:
+            print(f"⚠️ [5/6] Error generando embedding: {e}")
+        
+        # ===== PASO 6: Calcular match score y finalizar =====
+        # ===== PASO 6: Calcular match score Y guardar análisis completo =====
+        print("[6/6] Calculando match score y análisis detallado...")
+        
+        # Obtener el puesto_id de la postulación
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT puesto_id FROM postulaciones WHERE id = %s", (postulacion_id,))
+        row = cursor.fetchone()
+        puesto_id = row[0] if row else None
+        conn.close()
+        
+        # Variables para almacenar resultados
+        match_score = datos_actualizados.get('score', 50)
+        analisis_completo = None
+        
+        # Si hay puesto_id, calcular match detallado con IA
+        if puesto_id:
+            try:
+                # Llamar a la función que devuelve el análisis COMPLETO
+                resultado_match = calcular_match_detallado_con_ia(candidate_id, puesto_id)
+                match_score = resultado_match.get('score', match_score)
+                analisis_completo = resultado_match.get('analisis', {})
+                print(f"✅ Match calculado con IA: {match_score}%")
+                print(f"📊 Análisis detallado generado")
+            except Exception as e:
+                print(f"⚠️ Error en match IA, usando score base: {e}")
+                # Si falla, crear análisis básico
+                analisis_completo = {
+                    "resumen": f"Candidato con score {match_score}%",
+                    "fortalezas": datos_actualizados.get('interpretacion', {}).get('fortalezas', []),
+                    "debilidades": datos_actualizados.get('interpretacion', {}).get('areas_mejora', []),
+                    "recomendacion": "Revisar manualmente",
+                    "fecha_analisis": datetime.now().isoformat()
+                }
+        else:
+            # Análisis básico si no hay puesto
+            analisis_completo = {
+                "resumen": "Postulación recibida, pendiente de asignar a puesto",
+                "fortalezas": datos_actualizados.get('interpretacion', {}).get('fortalezas', []),
+                "debilidades": [],
+                "recomendacion": "Asignar a un puesto para evaluar",
+                "fecha_analisis": datetime.now().isoformat()
+            }
+        
+        # ACTUALIZAR postulación con match_score Y análisis completo
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE postulaciones 
+            SET estado = 'completado', 
+                match_score = %s,
+                match_analisis = %s::jsonb
+            WHERE id = %s
+        """, (match_score, json.dumps(analisis_completo, ensure_ascii=False), postulacion_id))
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ [6/6] Postulación completada. Match score: {match_score}%")
+        print(f"✅ [6/6] Análisis detallado guardado en BD")
+        # Opcional: Enviar correo de confirmación
+        try:
+            enviar_correo_resultado_postulacion(email, nombre, match_score, postulacion_id)
+        except Exception as e:
+            print(f"⚠️ Error enviando correo: {e}")
+        
+    except Exception as e:
+        print(f"❌❌❌ [BACKGROUND] ERROR FATAL: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Marcar postulación como error
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE postulaciones 
+                SET estado = 'error' 
+                WHERE id = %s
+            """, (postulacion_id,))
+            conn.commit()
+            conn.close()
+            print(f"📌 Postulación {postulacion_id} marcada como 'error'")
+        except:
+            pass
+
+def calcular_match_detallado_con_ia(candidate_id, puesto_id):
+    """Calcula match score Y devuelve análisis COMPLETO con todos los campos que espera el frontend"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Obtener datos del candidato
+        cursor.execute("SELECT raw_data FROM candidates WHERE id = %s", (candidate_id,))
+        candidato_row = cursor.fetchone()
+        
+        # Obtener datos del puesto
+        cursor.execute("SELECT * FROM puestos_trabajo WHERE id = %s", (puesto_id,))
+        puesto = cursor.fetchone()
+        
+        conn.close()
+        
+        if not candidato_row or not puesto:
+            return {
+                "score": 50, 
+                "analisis": {
+                    "resumen": "No se pudieron obtener datos completos",
+                    "confiabilidad": "Baja",
+                    "analisis_formacion": "Datos insuficientes para evaluar formación",
+                    "analisis_experiencia": "No se pudo evaluar la experiencia",
+                    "justificacion": "Error al cargar datos del candidato o puesto"
+                }
+            }
+        
+        # Parsear datos del candidato
+        candidato_data = candidato_row['raw_data']
+        if isinstance(candidato_data, str):
+            candidato_data = json.loads(candidato_data)
+        
+        dc = candidato_data.get('datos_crudos', {})
+        interp = candidato_data.get('interpretacion', {})
+        
+        # Extraer información de formación
+        universidad = dc.get('universidad', 'No especificada')
+        grado = dc.get('grado_academico', 'No especificado')
+        anio_graduacion = dc.get('anio_graduacion', 'No especificado')
+        certificaciones = dc.get('certificaciones', [])
+        
+        # Construir análisis de formación
+        if universidad != 'No especificada':
+            analisis_formacion = f"Candidato con formación en {grado} en {universidad}. "
+            if anio_graduacion != 'No especificado':
+                analisis_formacion += f"Graduado en {anio_graduacion}. "
+            if certificaciones:
+                analisis_formacion += f"Posee {len(certificaciones)} certificación(es): {', '.join(certificaciones[:3])}."
+            else:
+                analisis_formacion += "No se mencionan certificaciones adicionales."
+        else:
+            analisis_formacion = "No se pudo identificar la formación académica del candidato en el CV. Se recomienda validar en entrevista."
+        
+        # Extraer habilidades
+        habilidades_cv = [h.lower() for h in interp.get('habilidades_clave', [])]
+        habilidades_puesto = [h.lower() for h in (puesto.get('habilidades_requeridas') or [])]
+        
+        habilidades_coincidentes = [h for h in habilidades_cv if h in habilidades_puesto]
+        habilidades_faltantes = [h for h in habilidades_puesto if h not in habilidades_cv]
+        
+        # Calcular score
+        score = 50  # Base
+        
+        # Bonus por habilidades (máx 30 puntos)
+        if habilidades_puesto and len(habilidades_puesto) > 0:
+            score += min(30, (len(habilidades_coincidentes) / len(habilidades_puesto)) * 30)
+        
+        # Bonus por seniority (máx 15 puntos)
+        seniority_cv = interp.get('seniority', '').lower()
+        seniority_puesto = (puesto.get('seniority') or '').lower()
+        if seniority_cv and seniority_puesto:
+            if seniority_cv == seniority_puesto:
+                score += 15
+            elif seniority_cv in ['senior', 'lead'] and seniority_puesto in ['senior', 'lead']:
+                score += 10
+            elif seniority_cv == 'semisenior' and seniority_puesto == 'junior':
+                score += 5
+        
+        # Bonus por experiencia (máx 10 puntos)
+        anos_exp = interp.get('anos_experiencia_deducidos', '')
+        anos_exp_num = 0
+        if 'años' in anos_exp or 'año' in anos_exp:
+            import re
+            match = re.search(r'(\d+)', anos_exp)
+            if match:
+                anos_exp_num = int(match.group(1))
+                if anos_exp_num >= 8:
+                    score += 10
+                elif anos_exp_num >= 5:
+                    score += 7
+                elif anos_exp_num >= 3:
+                    score += 5
+                elif anos_exp_num >= 1:
+                    score += 3
+        
+        # Bonus por ubicación (máx 5 puntos)
+        ubicacion_cv = (dc.get('ubicacion') or '').lower()
+        ubicacion_puesto = (puesto.get('ubicacion') or '').lower()
+        if ubicacion_cv and ubicacion_puesto:
+            if ubicacion_cv == ubicacion_puesto:
+                score += 5
+            elif 'remoto' in ubicacion_cv or 'remoto' in ubicacion_puesto:
+                score += 3
+        
+        score = min(100, int(score))
+        
+        # Determinar nivel de confiabilidad
+        if score >= 70:
+            confiabilidad = "Alta"
+            nivel_texto = "excelente"
+        elif score >= 50:
+            confiabilidad = "Media"
+            nivel_texto = "moderado"
+        else:
+            confiabilidad = "Baja"
+            nivel_texto = "bajo"
+        
+        # Construir análisis de experiencia
+        empresas = dc.get('empresas', [])
+        if empresas:
+            analisis_experiencia = f"El candidato ha trabajado en {len(empresas)} empresa(s): {', '.join(empresas[:3])}. "
+            if anos_exp_num > 0:
+                analisis_experiencia += f"Acumula aproximadamente {anos_exp_num} años de experiencia. "
+            analisis_experiencia += interp.get('perfil_interpretado', '')[:200]
+        else:
+            analisis_experiencia = interp.get('perfil_interpretado', 'Experiencia no especificada en el CV')[:200]
+        
+        # Construir análisis completo con TODOS los campos que espera el frontend
+        analisis = {
+            # 🔥 CAMPOS OBLIGATORIOS QUE ESPERA EL FRONTEND 🔥
+            "resumen": f"El candidato tiene un {score}% de compatibilidad con el puesto de {puesto.get('titulo', '')}. Nivel de coincidencia {nivel_texto}.",
+            "confiabilidad": confiabilidad,
+            "analisis_formacion": analisis_formacion,
+            "analisis_experiencia": analisis_experiencia,
+            "score_ia": score,
+            "justificacion": f"El candidato coincide en {len(habilidades_coincidentes)} de {len(habilidades_puesto)} habilidades requeridas. Nivel de seniority: {interp.get('seniority', 'No detectado')} vs requerido: {puesto.get('seniority', 'No especificado')}. Experiencia: {anos_exp if anos_exp else 'No especificada'}.",
+            
+            # Campos adicionales
+            "resumen_ejecutivo": f"El candidato coincide en {len(habilidades_coincidentes)} de {len(habilidades_puesto)} habilidades requeridas.",
+            "fortalezas": [
+                f"Coincidencia en {len(habilidades_coincidentes)} habilidades técnicas" if habilidades_coincidentes else "Perfil alineado con el puesto",
+                f"Seniority {interp.get('seniority', 'detectado')}",
+                f"{universidad}" if universidad != 'No especificada' else "Perfil profesional sólido"
+            ],
+            "debilidades": [
+                f"Falta experiencia en: {', '.join(habilidades_faltantes[:3])}" if habilidades_faltantes else "Perfil bien alineado técnicamente",
+                "Requiere validación en entrevista técnica"
+            ],
+            "habilidades_coincidentes": habilidades_coincidentes[:5],
+            "habilidades_faltantes": habilidades_faltantes[:5],
+            "recomendacion": "Avanzar a entrevista técnica" if score >= 65 else "Evaluar con más detalle" if score >= 50 else "Descartar para este puesto",
+            "fecha_analisis": datetime.now().isoformat()
+        }
+        
+        print(f"📊 Análisis generado - Score: {score}%, Confiabilidad: {confiabilidad}")
+        print(f"   - analisis_formacion: {analisis_formacion[:100]}...")
+        print(f"   - analisis_experiencia: {analisis_experiencia[:100]}...")
+        
+        return {"score": score, "analisis": analisis}
+        
+    except Exception as e:
+        print(f"❌ Error calculando match detallado: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "score": 50, 
+            "analisis": {
+                "resumen": "Error durante el análisis del perfil",
+                "confiabilidad": "Baja",
+                "analisis_formacion": "No se pudo completar el análisis de formación debido a un error técnico",
+                "analisis_experiencia": "No se pudo completar el análisis de experiencia debido a un error técnico",
+                "justificacion": f"Error técnico: {str(e)[:100]}",
+                "fecha_analisis": datetime.now().isoformat()
+            }
+        }
+    
+@app.route("/api/postulacion/analisis-completo/<int:postulacion_id>", methods=["GET"])
+def obtener_analisis_completo_postulacion(postulacion_id):
+    """Obtiene el análisis completo de una postulación para el admin"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cursor.execute("""
+            SELECT 
+                p.id,
+                p.estado,
+                p.match_score,
+                p.match_analisis,
+                p.fecha_postulacion,
+                p.respuestas_formulario,
+                c.id as candidato_id,
+                c.nombre as candidato_nombre,
+                c.profesion as candidato_profesion,
+                c.raw_data as candidato_raw,
+                pu.titulo as puesto_titulo,
+                pu.cliente as puesto_cliente,
+                pu.descripcion as puesto_descripcion,
+                pu.habilidades_requeridas
+            FROM postulaciones p
+            JOIN candidates c ON p.candidato_id = c.id
+            JOIN puestos_trabajo pu ON p.puesto_id = pu.id
+            WHERE p.id = %s
+        """, (postulacion_id,))
+        
+        postulacion = cursor.fetchone()
+        conn.close()
+        
+        if not postulacion:
+            return jsonify({"success": False, "error": "Postulación no encontrada"}), 404
+        
+        # Parsear match_analisis
+        analisis = postulacion['match_analisis']
+        if analisis and isinstance(analisis, str):
+            try:
+                analisis = json.loads(analisis)
+            except:
+                analisis = {"error": "No se pudo parsear el análisis"}
+        elif not analisis:
+            analisis = {"estado": "pendiente", "mensaje": "El análisis aún no está disponible"}
+        
+        return jsonify({
+            "success": True,
+            "postulacion": {
+                "id": postulacion['id'],
+                "estado": postulacion['estado'],
+                "match_score": postulacion['match_score'],
+                "fecha": postulacion['fecha_postulacion'],
+                "candidato_nombre": postulacion['candidato_nombre'],
+                "candidato_profesion": postulacion['candidato_profesion'],
+                "puesto_titulo": postulacion['puesto_titulo'],
+                "puesto_cliente": postulacion['puesto_cliente']
+            },
+            "analisis": analisis
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500    
+
+
+def enviar_correo_resultado_postulacion(email, nombre, match_score, postulacion_id):
+    """Envía correo al candidato con el resultado del análisis"""
+    try:
+        from email_service import mailer
+        
+        if match_score >= 80:
+            nivel = "excelente"
+            emoji = "🎉"
+            mensaje_adicional = "¡Tu perfil es muy compatible! Nuestro equipo revisará tu postulación con prioridad."
+        elif match_score >= 60:
+            nivel = "bueno"
+            emoji = "👍"
+            mensaje_adicional = "Tu perfil tiene buena compatibilidad. Lo estamos evaluando."
+        else:
+            nivel = "moderado"
+            emoji = "📋"
+            mensaje_adicional = "Seguimos evaluando otras postulaciones. Te mantendremos informado."
+        
+        subject = f"📊 Resultado de tu postulación - Talent Pipeline"
+        body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; text-align: center; border-radius: 16px 16px 0 0;">
+                <h2 style="color: white; margin: 0;">{emoji} Talent Pipeline</h2>
+            </div>
+            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 16px 16px; border: 1px solid #e2e8f0;">
+                <h3 style="color: #1e293b;">Hola {nombre},</h3>
+                <p>Ya hemos analizado tu CV y perfil profesional.</p>
+                
+                <div style="background: white; padding: 20px; border-radius: 12px; margin: 20px 0; text-align: center; border: 1px solid #e2e8f0;">
+                    <div style="font-size: 48px; font-weight: bold; color: {'#10b981' if match_score >= 70 else '#f59e0b' if match_score >= 50 else '#ef4444'}">
+                        {match_score}%
+                    </div>
+                    <div style="color: #64748b;">Compatibilidad con el puesto</div>
+                    <div style="margin-top: 10px; font-weight: 500; color: {'#10b981' if match_score >= 70 else '#f59e0b' if match_score >= 50 else '#ef4444'}">
+                        Nivel {nivel}
+                    </div>
+                </div>
+                
+                <p>{mensaje_adicional}</p>
+                
+                <p><strong>ID de seguimiento:</strong> {postulacion_id}</p>
+                
+                <hr style="margin: 20px 0; border-color: #e2e8f0;">
+                <p style="color: #64748b; font-size: 12px;">
+                    Puedes consultar el estado de tus postulaciones ingresando a "Mis postulaciones" en nuestro portal.
+                </p>
+                <p style="color: #94a3b8; font-size: 11px;">Equipo de Talent Pipeline</p>
+            </div>
+        </div>
+        """
+        
+        result = mailer.send_email_sync(email, subject, body, is_html=True)
+        if result.get('success'):
+            print(f"📧 Correo enviado a {email}")
+        else:
+            print(f"⚠️ Error enviando correo: {result.get('error')}")
+            
+    except Exception as e:
+        print(f"❌ Error enviando correo: {e}")
+
+
+@app.route("/api/postulacion/estado/<int:postulacion_id>", methods=["GET"])
+def obtener_estado_postulacion(postulacion_id):
+    """Obtiene el estado actual de una postulación"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        cursor.execute("""
+            SELECT 
+                p.id,
+                p.estado,
+                p.match_score,
+                p.fecha_postulacion,
+                c.nombre as candidato_nombre,
+                c.raw_data->>'estado_procesamiento' as procesamiento_cv
+            FROM postulaciones p
+            JOIN candidates c ON p.candidato_id = c.id
+            WHERE p.id = %s
+        """, (postulacion_id,))
+        
+        postulacion = cursor.fetchone()
+        conn.close()
+        
+        if not postulacion:
+            return jsonify({"success": False, "error": "Postulación no encontrada"}), 404
+        
+        # Determinar estado legible
+        if postulacion['match_score'] is not None and postulacion['match_score'] > 0:
+            estado_legible = "completado"
+            mensaje = f"✅ Análisis completado. Match: {postulacion['match_score']}%"
+        elif postulacion['estado'] == 'procesando':
+            estado_legible = "procesando"
+            mensaje = "🔄 Analizando tu CV y perfil..."
+        elif postulacion['estado'] == 'error':
+            estado_legible = "error"
+            mensaje = "❌ Hubo un error. Por favor, contacta a soporte."
+        else:
+            estado_legible = "pendiente"
+            mensaje = "⏳ Tu postulación está en cola de análisis"
+        
+        return jsonify({
+            "success": True,
+            "postulacion": {
+                "id": postulacion['id'],
+                "estado": estado_legible,
+                "mensaje": mensaje,
+                "match_score": postulacion['match_score'],
+                "fecha": postulacion['fecha_postulacion']
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500        
+
+def enviar_correo_confirmacion(email, nombre, postulacion_id):
+    """Envía correo de confirmación al candidato"""
+    try:
+        from email_service import mailer
+        
+        subject = "📋 Postulación recibida - Talent Pipeline"
+        body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: #10b981; padding: 20px; text-align: center; border-radius: 12px 12px 0 0;">
+                <h2 style="color: white; margin: 0;">✅ ¡Postulación recibida!</h2>
+            </div>
+            <div style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 0 0 12px 12px;">
+                <h3>Hola {nombre},</h3>
+                <p>Hemos recibido tu postulación correctamente.</p>
+                <p>Estamos analizando tu CV y perfil. En las próximas horas recibirás una actualización sobre el estado de tu postulación.</p>
+                <p><strong>ID de seguimiento:</strong> {postulacion_id}</p>
+                <hr style="margin: 20px 0;">
+                <p style="color: #64748b; font-size: 12px;">Equipo de Talent Pipeline</p>
+            </div>
+        </div>
+        """
+        
+        mailer.send_email_sync(email, subject, body, is_html=True)
+        print(f"📧 [BACKGROUND] Correo de confirmación enviado a {email}")
+        
+    except Exception as e:
+        print(f"❌ [BACKGROUND] Error enviando correo: {e}")
+
+def calcular_match_y_actualizar(postulacion_id, candidate_id, puesto_id):
+    """Calcula el match score y actualiza la postulación"""
+    import time
+    print(f"🎯 [MATCH] Calculando match para postulación {postulacion_id}")
+    
+    try:
+        resultado = calcular_match_score_con_ia(candidate_id, puesto_id)
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE postulaciones 
+            SET match_score = %s, 
+                match_analisis = %s::jsonb,
+                estado = 'revisado'
+            WHERE id = %s
+        """, (resultado.get('score', 0), json.dumps(resultado, ensure_ascii=False), postulacion_id))
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ [MATCH] Match calculado: {resultado.get('score', 0)}% para postulación {postulacion_id}")
+        
+    except Exception as e:
+        print(f"❌ [MATCH] Error: {e}")
+
 
 @app.route("/api/postulacion/estado/<int:postulacion_id>", methods=["GET"])
 def postulacion_estado(postulacion_id):
@@ -4215,29 +4822,25 @@ def postulacion_estado(postulacion_id):
 
 
 def calcular_match_score_con_ia(candidate_id, puesto_id):
-    """Calcula el match score usando el análisis estructurado del CV y los requisitos del puesto"""
+    """Calcula el match score entre un candidato y un puesto usando IA"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         # Obtener datos del candidato
-        cursor.execute("""
-            SELECT raw_data FROM candidates WHERE id = %s
-        """, (candidate_id,))
+        cursor.execute("SELECT raw_data FROM candidates WHERE id = %s", (candidate_id,))
         candidato_row = cursor.fetchone()
         
         # Obtener datos del puesto
-        cursor.execute("""
-            SELECT * FROM puestos_trabajo WHERE id = %s
-        """, (puesto_id,))
+        cursor.execute("SELECT * FROM puestos_trabajo WHERE id = %s", (puesto_id,))
         puesto = cursor.fetchone()
         
         conn.close()
         
         if not candidato_row or not puesto:
-            return {"score": 0, "analisis": {}}
+            return {"score": 50, "analisis": {}}
         
-        # Parsear datos del candidato (ya estructurados por analyze_cv)
+        # Parsear datos del candidato
         candidato_data = candidato_row['raw_data']
         if isinstance(candidato_data, str):
             candidato_data = json.loads(candidato_data)
@@ -4245,108 +4848,38 @@ def calcular_match_score_con_ia(candidate_id, puesto_id):
         dc = candidato_data.get('datos_crudos', {})
         interp = candidato_data.get('interpretacion', {})
         
-        # Construir prompt para evaluación
-        prompt = f"""
-Actúa como un Headhunter Senior experto en evaluar candidatos para puestos específicos.
-
-## 📋 PERFIL DEL PUESTO
-
-**Título:** {puesto['titulo']}
-**Cliente:** {puesto['cliente']}
-**Seniority requerido:** {puesto['seniority'] or 'No especificado'}
-**Ubicación:** {puesto['ubicacion'] or 'No especificada'}
-**Modalidad:** {puesto.get('modalidad', 'No especificada')}
-
-**Descripción:**
-{puesto['descripcion'] or 'No disponible'}
-
-**Requisitos:**
-{puesto['requisitos'] or 'No especificados'}
-
-**Habilidades requeridas:**
-{', '.join(puesto['habilidades_requeridas'] or [])}
-
-**Responsabilidades:**
-{chr(10).join(['- ' + r for r in (puesto.get('responsabilidades') or [])])}
-
-## 👤 PERFIL DEL CANDIDATO (Extraído de su CV)
-
-**Nombre:** {dc.get('nombre', 'No disponible')}
-**Profesión:** {dc.get('profesion_escrita', 'No disponible')}
-**Ubicación:** {dc.get('ubicacion', 'No disponible')}
-**Universidad:** {dc.get('universidad', 'No disponible')}
-**Grado académico:** {dc.get('grado_academico', 'No disponible')}
-**Años de experiencia:** {interp.get('anos_experiencia_deducidos', 'No disponible')}
-**Seniority detectado:** {interp.get('seniority', 'No disponible')}
-**Sector:** {interp.get('sector_deducido', 'No disponible')}
-
-**Empresas donde ha trabajado:**
-{chr(10).join(['- ' + e for e in (dc.get('empresas', []))]) if dc.get('empresas') else 'No especificadas'}
-
-**Habilidades clave:**
-{', '.join(interp.get('habilidades_clave', [])) if interp.get('habilidades_clave') else 'No especificadas'}
-
-**Certificaciones:**
-{', '.join(dc.get('certificaciones', [])) if dc.get('certificaciones') else 'No especificadas'}
-
-**Perfil interpretado por IA:**
-{interp.get('perfil_interpretado', 'No disponible')}
-
-**Fortalezas del candidato:**
-{chr(10).join(['- ' + f for f in (interp.get('fortalezas', []))]) if interp.get('fortalezas') else 'No especificadas'}
-
-**Áreas de mejora según CV:**
-{chr(10).join(['- ' + a for a in (interp.get('areas_mejora', []))]) if interp.get('areas_mejora') else 'No especificadas'}
-
-**Recomendación del análisis de CV:**
-{interp.get('recomendacion', 'No disponible')}
-
-## 🎯 TAREA
-
-Evalúa qué tan buen match es este candidato para el puesto. Devuelve SOLO JSON:
-
-{{
-  "score": 0-100,
-  "resumen": "resumen ejecutivo de 2-3 líneas",
-  "fortalezas": ["fortaleza1", "fortaleza2", "fortaleza3"],
-  "debilidades": ["debilidad1", "debilidad2"],
-  "habilidades_coincidentes": ["habilidad1", "habilidad2"],
-  "habilidades_faltantes": ["habilidad que el puesto requiere y el candidato no tiene"],
-  "analisis_experiencia": "comentario sobre su experiencia relevante",
-  "analisis_formacion": "comentario sobre su formación",
-  "recomendacion": "avanzar/entrevistar/descartar",
-  "justificacion": "explicación detallada del score y la recomendación"
-}}
-
-**Importante:** Sé honesto y crítico. Basa tu evaluación en los datos proporcionados.
-"""
+        # Calcular match básico
+        score = 50  # Base
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=1500
-        )
+        # Bonus por habilidades coincidentes
+        habilidades_cv = [h.lower() for h in interp.get('habilidades_clave', [])]
+        habilidades_puesto = [h.lower() for h in (puesto.get('habilidades_requeridas') or [])]
         
-        contenido = response.choices[0].message.content
-        resultado = safe_json_parse(contenido)
+        coincidencias = sum(1 for h in habilidades_cv if h in habilidades_puesto)
+        if habilidades_puesto:
+            score += min(30, (coincidencias / len(habilidades_puesto)) * 30)
         
-        # Guardar el análisis en la postulación
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE postulaciones 
-            SET match_score = %s, match_analisis = %s::jsonb
-            WHERE candidato_id = %s AND puesto_id = %s
-        """, (resultado.get('score', 0), json.dumps(resultado, ensure_ascii=False), candidate_id, puesto_id))
-        conn.commit()
-        conn.close()
+        # Bonus por seniority
+        seniority_cv = interp.get('seniority', '').lower()
+        seniority_puesto = (puesto.get('seniority') or '').lower()
+        if seniority_cv == seniority_puesto:
+            score += 15
+        elif seniority_cv in ['senior', 'lead'] and seniority_puesto in ['senior', 'lead']:
+            score += 10
         
-        return resultado
+        # Bonus por ubicación
+        ubicacion_cv = (dc.get('ubicacion') or '').lower()
+        ubicacion_puesto = (puesto.get('ubicacion') or '').lower()
+        if ubicacion_cv and ubicacion_puesto and ubicacion_cv == ubicacion_puesto:
+            score += 10
+        
+        score = min(100, score)
+        
+        return {"score": score, "analisis": {"coincidencias": coincidencias}}
         
     except Exception as e:
         print(f"❌ Error calculando match: {e}")
-        return {"score": 0, "analisis": {}}
+        return {"score": 50, "analisis": {}}
 
 
 @app.route("/api/mis-postulaciones", methods=["GET"])
@@ -6313,6 +6846,9 @@ def dashboard():
 # INICIO
 # =====================================================
 if __name__ == "__main__":
+    import webbrowser
+    import threading
+    
     print("🔍 Verificando conexión a PostgreSQL...")
     try:
         conn = get_db_connection()
@@ -6323,4 +6859,16 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Error conectando a PostgreSQL: {e}")
         print("⚠️ Asegúrate de que PostgreSQL esté corriendo")
-    app.run(debug=True, port=5001)
+    
+    # Función para abrir el navegador después de que el servidor inicie
+    def abrir_navegador():
+        import time
+        time.sleep(3)  # Esperar 3 segundos a que Flask arranque bien
+        webbrowser.open("http://localhost:5001/login.html")
+        print("🌐 Navegador abierto en http://localhost:5001/login.html")
+    
+    # Iniciar el servidor
+    threading.Thread(target=abrir_navegador, daemon=True).start()
+    
+    # Deshabilitar el recargador automático para que no se cierre la pestaña
+    app.run(debug=True, port=5001, use_reloader=False)
