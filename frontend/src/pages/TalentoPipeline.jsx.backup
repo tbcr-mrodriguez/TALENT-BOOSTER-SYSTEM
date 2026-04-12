@@ -1019,7 +1019,7 @@ function App() {
               </div>
             </div>
           ) : activeTab === 'entrevistas' ? (
-            <div className="card-flat" style={{ padding: "1.5rem" }}><p style={{ color: "#64748b" }}>Módulo de entrevistas en desarrollo</p></div>
+            <EntrevistasDashboard />
           ) : activeTab === 'correos' ? (
             <GestionCorreos />
           ) : null}

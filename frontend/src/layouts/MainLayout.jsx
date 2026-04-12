@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -12,7 +12,10 @@ import {
   Settings,
   Menu,
   X,
-  FileText
+  FileText,
+  LogOut,
+  Bell,
+  User
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
@@ -32,27 +35,60 @@ const menuItems = [
 ];
 
 const portalItem = { 
-  path: `${API_BASE_URL}/candidatos-portal.html`, 
+  path: '/candidatos-portal',  // ← Cambiar a la ruta de React
   icon: Briefcase, 
-  label: 'Portal del Candidato' 
+  label: 'Portal del Candidato',
+  external: false  // ← No es externo, es ruta de React
 };
 
 const MainLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userName, setUserName] = useState('Usuario');
   const location = useLocation();
 
+  // Obtener nombre del usuario desde localStorage
+  useEffect(() => {
+    const user = localStorage.getItem('user');
+    if (user) {
+      try {
+        const userData = JSON.parse(user);
+        setUserName(userData.nombre || userData.email || 'Usuario');
+      } catch (e) {
+        console.error('Error parsing user:', e);
+      }
+    }
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    window.location.href = '/login.html';
+  };
+
+  // Obtener el título de la página actual
+  const getPageTitle = () => {
+    const currentItem = menuItems.find(item => item.path === location.pathname);
+    return currentItem ? currentItem.label : 'Talent Pipeline';
+  };
+
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#f1f5f9' }}>
-      {/* Sidebar */}
+    <div style={{ 
+      display: 'flex', 
+      minHeight: '100vh', 
+      background: '#f8fafc' 
+    }}>
+      {/* ==================== SIDEBAR (Flat 2.0) ==================== */}
       <div style={{
         width: sidebarOpen ? '260px' : '80px',
         background: 'white',
-        boxShadow: '2px 0 8px rgba(0,0,0,0.05)',
-        transition: 'width 0.3s',
+        borderRight: '1px solid #e2e8f0',
+        transition: 'width 0.3s ease',
         position: 'fixed',
         height: '100vh',
-        overflow: 'hidden',
-        zIndex: 50
+        overflowY: 'auto',
+        zIndex: 50,
+        display: 'flex',
+        flexDirection: 'column'
       }}>
         {/* Logo */}
         <div style={{
@@ -62,27 +98,44 @@ const MainLayout = () => {
           alignItems: 'center',
           justifyContent: sidebarOpen ? 'space-between' : 'center'
         }}>
-          {sidebarOpen ? (
-            <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#2563eb', margin: 0 }}>Talent Pipeline</h1>
-          ) : (
-            <span style={{ fontSize: '1.5rem' }}>🎯</span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <span style={{ fontSize: '18px' }}>🎯</span>
+            </div>
+            {sidebarOpen && (
+              <div>
+                <h1 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>Talent</h1>
+                <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: 0, lineHeight: 1 }}>Pipeline</p>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             style={{
               background: '#f1f5f9',
               border: 'none',
               borderRadius: '8px',
-              padding: '4px 8px',
-              cursor: 'pointer'
+              padding: '6px 10px',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
             }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#e2e8f0'}
+            onMouseLeave={(e) => e.currentTarget.style.background = '#f1f5f9'}
           >
             {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
         </div>
 
-        {/* Menu */}
-        <nav style={{ padding: '16px 12px' }}>
+        {/* Menú */}
+        <nav style={{ padding: '16px 12px', flex: 1 }}>
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -96,15 +149,23 @@ const MainLayout = () => {
                   gap: '12px',
                   padding: '10px 12px',
                   marginBottom: '4px',
-                  borderRadius: '10px',
-                  background: isActive ? '#e0e7ff' : 'transparent',
-                  color: isActive ? '#2563eb' : '#475569',
+                  borderRadius: '12px',
+                  background: isActive ? '#eff6ff' : 'transparent',
+                  color: isActive ? '#2563eb' : '#64748b',
                   textDecoration: 'none',
                   fontSize: '0.875rem',
-                  fontWeight: isActive ? 600 : 400
+                  fontWeight: isActive ? 600 : 500,
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.background = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.background = 'transparent';
                 }}
               >
-                <Icon size={20} />
+                <Icon size={20} strokeWidth={isActive ? 2 : 1.5} />
                 {sidebarOpen && <span>{item.label}</span>}
               </Link>
             );
@@ -128,36 +189,155 @@ const MainLayout = () => {
               gap: '12px',
               padding: '10px 12px',
               marginBottom: '4px',
-              borderRadius: '10px',
+              borderRadius: '12px',
               background: 'transparent',
-              color: '#475569',
+              color: '#64748b',
               textDecoration: 'none',
               fontSize: '0.875rem',
-              fontWeight: 400,
-              cursor: 'pointer'
+              fontWeight: 500,
+              transition: 'all 0.2s ease'
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#f1f5f9';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <portalItem.icon size={20} />
+            <portalItem.icon size={20} strokeWidth={1.5} />
             {sidebarOpen && <span>{portalItem.label}</span>}
           </a>
         </nav>
+
+        {/* Footer del Sidebar - Cerrar Sesión */}
+        <div style={{
+          padding: '16px',
+          borderTop: '1px solid #e2e8f0',
+          marginTop: 'auto'
+        }}>
+          <button
+            onClick={handleLogout}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '10px 12px',
+              width: '100%',
+              borderRadius: '12px',
+              background: 'transparent',
+              color: '#ef4444',
+              border: 'none',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#fef2f2'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <LogOut size={20} />
+            {sidebarOpen && <span>Cerrar Sesión</span>}
+          </button>
+        </div>
       </div>
 
-      {/* Main Content */}
+      {/* ==================== MAIN CONTENT ==================== */}
       <div style={{
         marginLeft: sidebarOpen ? '260px' : '80px',
-        padding: '24px',
         flex: 1,
-        transition: 'margin-left 0.3s',
-        width: '100%'
+        transition: 'margin-left 0.3s ease',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column'
       }}>
-        <Outlet />
+        {/* Header (Flat 2.0) */}
+        <header style={{
+          background: 'white',
+          borderBottom: '1px solid #e2e8f0',
+          padding: '16px 24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          position: 'sticky',
+          top: 0,
+          zIndex: 40
+        }}>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
+              {getPageTitle()}
+            </h2>
+            <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '4px 0 0' }}>
+              {new Date().toLocaleDateString('es-CR', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
+            </p>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* Notificaciones */}
+            <button style={{
+              background: 'transparent',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '8px',
+              cursor: 'pointer',
+              position: 'relative',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <Bell size={20} color="#64748b" />
+              <span style={{
+                position: 'absolute',
+                top: '4px',
+                right: '4px',
+                width: '8px',
+                height: '8px',
+                background: '#ef4444',
+                borderRadius: '50%'
+              }} />
+            </button>
+            
+            {/* Usuario */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '6px 12px 6px 8px',
+              borderRadius: '40px',
+              background: '#f8fafc',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+            >
+              <div style={{
+                width: '32px',
+                height: '32px',
+                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                fontSize: '14px',
+                fontWeight: 'bold'
+              }}>
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <span style={{ fontSize: '0.875rem', fontWeight: 500, color: '#334155' }}>{userName}</span>
+            </div>
+          </div>
+        </header>
+
+        {/* Contenido principal con padding y fondo */}
+        <main style={{ 
+          padding: '24px',
+          background: '#f8fafc',
+          flex: 1
+        }}>
+          <Outlet />
+        </main>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+
 """
 Configuración centralizada de la aplicación
 Soporta desarrollo y producción mediante variables de entorno
@@ -65,12 +66,12 @@ ALLOWED_ORIGINS = CORS_ORIGINS.get(ENVIRONMENT, CORS_ORIGINS['development'])
 # =====================================================
 RATE_LIMITS = {
     'development': {
-        'default': ["5000 per day", "1000 per hour"],
+        'default': ["200 per day", "50 per hour"],
         'analyze': "10 per minute",
         'search': "30 per minute",
     },
     'production': {
-        'default': ["5000 per day", "1000 per hour"],
+        'default': ["100 per day", "25 per hour"],
         'analyze': "5 per minute",
         'search': "15 per minute",
     }

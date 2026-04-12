@@ -106,6 +106,8 @@ limiter = Limiter(
     default_limits=RATE_LIMITS_CONFIG['default']
 )
 
+
+
 # =====================================================
 # CONFIGURACIÓN DE CARPETAS (igual que antes)
 # =====================================================
@@ -3961,24 +3963,32 @@ def ver_video_entrevista(filename):
 @app.route("/api/entrevista/reporte-completo-v2/<int:entrevista_id>", methods=["GET"])
 def reporte_completo_v2(entrevista_id):
     """Obtiene reporte completo con toda la información de la plantilla"""
+    print(f"🔥 reporte_completo_v2 llamado con ID: {entrevista_id}")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        print(f"📡 Ejecutando CALL obtener_reporte_completo_entrevista({entrevista_id}, NULL)")
         cursor.execute("CALL obtener_reporte_completo_entrevista(%s, %s)", (entrevista_id, None))
         row = cursor.fetchone()
         conn.close()
         
+        print(f"📥 Row obtenido: {row}")
+        
         if not row or not row[0]:
+            print(f"❌ No se encontraron datos para entrevista {entrevista_id}")
             return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
         
         resultado = json.loads(row[0])
+        print(f"✅ Resultado parseado: {resultado.keys() if resultado else 'None'}")
         
         return jsonify(resultado)
         
     except Exception as e:
         print(f"❌ Error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500  
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 def transcribir_video(filepath, idioma=None):
@@ -6841,6 +6851,34 @@ def dashboard():
     from flask import redirect
     return redirect("http://localhost:3000")
 
+@app.route("/nuevo-diseno")
+def nuevo_diseno():
+    return render_template("nuevo-diseno.html")
+
+# Reemplaza la ruta /dashboard existente o agrega estas líneas
+
+@app.route('/')
+def serve_react_app():
+    """Sirve la aplicación React (SPA)"""
+    return render_template('index.html')
+
+# Catch-all para rutas de React (SPA)
+# Esto debe ir al FINAL del archivo, antes de if __name__ == "__main__"
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    """Para rutas de React, sirve index.html"""
+    # Si la ruta es una API, no la atrapamos
+    if path.startswith('api/') or path.startswith('static/'):
+        return "Not found", 404
+    # Si es un archivo estático que existe, lo servimos
+    full_path = os.path.join(app.template_folder, path)
+    if os.path.exists(full_path) and not path.startswith('api'):
+        return send_file(full_path)
+    # Para todo lo demás, servimos index.html (React Router se encarga)
+    return render_template('index.html')
+
+
 
 # =====================================================
 # INICIO
@@ -6863,9 +6901,8 @@ if __name__ == "__main__":
     # Función para abrir el navegador después de que el servidor inicie
     def abrir_navegador():
         import time
-        time.sleep(3)  # Esperar 3 segundos a que Flask arranque bien
-        webbrowser.open("http://localhost:5001/login.html")
-        print("🌐 Navegador abierto en http://localhost:5001/login.html")
+        time.sleep(3)
+        webbrowser.open("http://localhost:5001/")  # ← Esto abre React (index.html)
     
     # Iniciar el servidor
     threading.Thread(target=abrir_navegador, daemon=True).start()

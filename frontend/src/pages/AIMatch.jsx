@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import FichaCandidato from '../components/FichaCandidato';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
-// Función segura para parsear raw_data
 const safeParseRawData = (data) => {
   if (!data) return {};
   if (typeof data === 'string') {
@@ -66,297 +66,252 @@ const AIMatch = () => {
     setMatchCargando(false);
   };
 
+  const getScoreColor = (score) => {
+    if (score >= 80) return { bg: '#d1fae5', text: '#065f46' };
+    if (score >= 60) return { bg: '#dbeafe', text: '#1e40af' };
+    if (score >= 40) return { bg: '#fed7aa', text: '#9a3412' };
+    return { bg: '#fee2e2', text: '#991b1b' };
+  };
+
+  const getSeniorityColor = (seniority) => {
+    if (seniority === 'Senior') return { bg: '#d1fae5', text: '#065f46' };
+    if (seniority === 'Semi-Senior') return { bg: '#dbeafe', text: '#1e40af' };
+    if (seniority === 'Junior') return { bg: '#fef3c7', text: '#92400e' };
+    return { bg: '#f1f5f9', text: '#475569' };
+  };
+
+  const escapeHtml = (text) => {
+    if (!text) return '';
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  };
+
   return (
-    <div style={{
-      background: 'white',
-      borderRadius: '24px',
-      padding: '2rem',
-      margin: '0',
-      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.05)',
-      border: '1px solid #e5e7eb'
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <div>
-          <h2 style={{ fontSize: '1.8rem', fontWeight: '700', color: '#1a1a1a' }}>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      
+      {/* Tarjeta principal */}
+      <div className="card-flat" style={{ padding: '1.5rem' }}>
+        
+        {/* Header */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.25rem' }}>
             🎯 AI Match
           </h2>
-          <p style={{ color: '#666' }}>Describa el puesto y nuestra IA encontrará los mejores candidatos</p>
+          <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            Describe el puesto y nuestra IA encontrará los mejores candidatos
+          </p>
         </div>
-      </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          placeholder="Título del puesto (ej: Desarrollador Senior)"
-          value={matchTitulo}
-          onChange={(e) => setMatchTitulo(e.target.value)}
-          style={{
-            flex: 1,
-            minWidth: '250px',
-            padding: '1rem',
-            border: '1px solid #e5e7eb',
-            borderRadius: '12px',
-            fontSize: '1rem'
-          }}
-        />
-        <textarea
-          placeholder="Describa las responsabilidades, requisitos y habilidades necesarias..."
-          value={matchDescripcion}
-          onChange={(e) => setMatchDescripcion(e.target.value)}
-          rows={3}
-          style={{
-            flex: 2,
-            padding: '1rem',
-            border: '1px solid #e5e7eb',
-            borderRadius: '12px',
-            fontSize: '1rem',
-            fontFamily: 'inherit',
-            resize: 'vertical'
-          }}
-        />
-        <button
-          onClick={buscarMatches}
-          disabled={matchCargando}
-          style={{
-            padding: '1rem 2rem',
-            background: '#553BC4',
-            color: 'white',
-            border: 'none',
-            borderRadius: '12px',
-            fontSize: '1rem',
-            fontWeight: '600',
-            cursor: matchCargando ? 'not-allowed' : 'pointer',
-            opacity: matchCargando ? 0.7 : 1,
-            whiteSpace: 'nowrap'
-          }}
-        >
-          {matchCargando ? 'Buscando...' : '🔍 Buscar matches'}
-        </button>
-      </div>
+        {/* Formulario de búsqueda */}
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="Título del puesto (ej: Desarrollador Senior)"
+            value={matchTitulo}
+            onChange={(e) => setMatchTitulo(e.target.value)}
+            className="input-focus"
+            style={{
+              flex: 1,
+              minWidth: '200px',
+              padding: '0.75rem 1rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              fontSize: '0.875rem'
+            }}
+          />
+          <textarea
+            placeholder="Describe las responsabilidades, requisitos y habilidades necesarias..."
+            value={matchDescripcion}
+            onChange={(e) => setMatchDescripcion(e.target.value)}
+            rows={3}
+            className="input-focus"
+            style={{
+              flex: 2,
+              padding: '0.75rem 1rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              fontSize: '0.875rem',
+              fontFamily: 'inherit',
+              resize: 'vertical'
+            }}
+          />
+          <button
+            onClick={buscarMatches}
+            disabled={matchCargando}
+            className="btn-primary"
+            style={{
+              padding: '0.75rem 1.5rem',
+              whiteSpace: 'nowrap',
+              opacity: matchCargando ? 0.7 : 1
+            }}
+          >
+            {matchCargando ? 'Buscando...' : 'Buscar matches'}
+          </button>
+        </div>
 
-      {matchResultados.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: '1.3rem', fontWeight: '600' }}>
-              Mejores candidatos ({matchResultados.length})
-            </h3>
-            <span style={{ background: '#f0edfe', color: '#553BC4', padding: '0.3rem 1rem', borderRadius: '50px', fontSize: '0.9rem' }}>
-              Ordenados por match score
-            </span>
-          </div>
+        {/* Resultados */}
+        {matchResultados.length > 0 && (
+          <div>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginBottom: '1rem',
+              flexWrap: 'wrap',
+              gap: '0.5rem'
+            }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b' }}>
+                Mejores candidatos ({matchResultados.length})
+              </h3>
+              <span className="badge" style={{ background: '#e0e7ff', color: '#1e40af', padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.7rem' }}>
+                Ordenados por match score
+              </span>
+            </div>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-            gap: '1.5rem'
-          }}>
-            {matchResultados.map((candidato, index) => {
-              let datos = candidato;
-              if (candidato.raw_data) {
-                datos = safeParseRawData(candidato.raw_data);
-              }
-              
-              const nombre = datos.datos_crudos?.nombre || candidato.nombre || 'Candidato';
-              const profesion = datos.datos_crudos?.profesion_escrita || candidato.profesion || '';
-              const ubicacion = datos.datos_crudos?.ubicacion || candidato.ubicacion || 'No especificada';
-              const experiencia = datos.interpretacion?.anos_experiencia_deducidos || candidato.anos_experiencia || 'N/A';
-              const seniority = datos.interpretacion?.seniority || 'N/A';
-              const habilidades = datos.interpretacion?.habilidades_clave || candidato.habilidades || [];
-              const matchScore = candidato.match_score || candidato.similitud_semantica || 0;
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+              gap: '1rem'
+            }}>
+              {matchResultados.map((candidato, index) => {
+                let datos = candidato;
+                if (candidato.raw_data) {
+                  datos = safeParseRawData(candidato.raw_data);
+                }
+                
+                const nombre = datos.datos_crudos?.nombre || candidato.nombre || 'Candidato';
+                const profesion = datos.datos_crudos?.profesion_escrita || candidato.profesion || '';
+                const ubicacion = datos.datos_crudos?.ubicacion || candidato.ubicacion || 'No especificada';
+                const experiencia = datos.interpretacion?.anos_experiencia_deducidos || candidato.anos_experiencia || 'N/A';
+                const seniority = datos.interpretacion?.seniority || 'N/A';
+                const habilidades = datos.interpretacion?.habilidades_clave || candidato.habilidades || [];
+                const matchScore = candidato.match_score || candidato.similitud_semantica || 0;
+                const scoreStyle = getScoreColor(matchScore);
+                const seniorityStyle = getSeniorityColor(seniority);
 
-              let scoreColor = '#dc2626';
-              if (matchScore >= 80) scoreColor = '#16a34a';
-              else if (matchScore >= 60) scoreColor = '#2563eb';
-              else if (matchScore >= 40) scoreColor = '#ca8a04';
-
-              return (
-                <div
-                  key={index}
-                  style={{
-                    background: 'white',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '20px',
-                    padding: '1.5rem',
-                    transition: 'all 0.3s ease',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.boxShadow = '0 20px 25px -5px rgba(85,59,196,0.1)';
-                    e.currentTarget.style.borderColor = '#553BC4';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.02)';
-                    e.currentTarget.style.borderColor = '#e5e7eb';
-                  }}
-                  onClick={() => verFicha(candidato)}
-                >
-                  <div style={{
-                    position: 'absolute',
-                    top: '1rem',
-                    right: '1rem',
-                    background: scoreColor,
-                    color: 'white',
-                    padding: '0.3rem 0.8rem',
-                    borderRadius: '50px',
-                    fontSize: '0.8rem',
-                    fontWeight: '700'
-                  }}>
-                    {matchScore}% match
-                  </div>
-
-                  <div style={{ marginBottom: '1rem', paddingRight: '60px' }}>
-                    <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '0.3rem' }}>
-                      {nombre}
-                    </h3>
-                    <p style={{ color: '#553BC4', fontWeight: '500', fontSize: '0.9rem' }}>
-                      {profesion}
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                    <span style={{
-                      background: '#f0edfe',
-                      color: '#553BC4',
-                      padding: '0.3rem 0.8rem',
-                      borderRadius: '50px',
-                      fontSize: '0.8rem',
-                      fontWeight: '500'
+                return (
+                  <div
+                    key={index}
+                    className="card-flat"
+                    onClick={() => verFicha(candidato)}
+                    style={{
+                      padding: '1rem',
+                      cursor: 'pointer',
+                      border: '1px solid #e2e8f0',
+                      position: 'relative',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.08)';
+                      e.currentTarget.style.borderColor = '#3b82f6';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.borderColor = '#e2e8f0';
+                    }}
+                  >
+                    {/* Score badge */}
+                    <div style={{
+                      position: 'absolute',
+                      top: '0.75rem',
+                      right: '0.75rem',
+                      background: scoreStyle.bg,
+                      color: scoreStyle.text,
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '20px',
+                      fontSize: '0.65rem',
+                      fontWeight: '600'
                     }}>
-                      {seniority}
-                    </span>
-                    <span style={{
-                      background: '#f3f4f6',
-                      color: '#4b5563',
-                      padding: '0.3rem 0.8rem',
-                      borderRadius: '50px',
-                      fontSize: '0.8rem',
-                      fontWeight: '500'
-                    }}>
-                      📍 {ubicacion}
-                    </span>
-                    <span style={{
-                      background: '#f3f4f6',
-                      color: '#4b5563',
-                      padding: '0.3rem 0.8rem',
-                      borderRadius: '50px',
-                      fontSize: '0.8rem',
-                      fontWeight: '500'
-                    }}>
-                      ⏱️ {experiencia}
-                    </span>
-                  </div>
+                      {matchScore}% match
+                    </div>
 
-                  <div style={{ marginTop: '1rem' }}>
-                    <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>
-                      Habilidades clave:
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.3rem', flexWrap: 'wrap' }}>
-                      {habilidades.slice(0, 4).map((skill, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            background: '#f3f4f6',
-                            color: '#374151',
-                            padding: '0.2rem 0.6rem',
-                            borderRadius: '4px',
-                            fontSize: '0.75rem',
-                            fontWeight: '500'
-                          }}
-                        >
-                          {skill}
-                        </span>
-                      ))}
-                      {habilidades.length > 4 && (
-                        <span style={{
-                          background: '#f3f4f6',
-                          color: '#374151',
-                          padding: '0.2rem 0.6rem',
-                          borderRadius: '4px',
-                          fontSize: '0.75rem',
-                          fontWeight: '500'
-                        }}>
-                          +{habilidades.length - 4}
-                        </span>
-                      )}
+                    {/* Nombre y profesión */}
+                    <div style={{ marginBottom: '0.75rem', paddingRight: '60px' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.25rem' }}>
+                        {nombre}
+                      </h3>
+                      <p style={{ color: '#3b82f6', fontWeight: '500', fontSize: '0.75rem' }}>
+                        {profesion}
+                      </p>
+                    </div>
+
+                    {/* Badges */}
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                      <span className="badge" style={{ background: seniorityStyle.bg, color: seniorityStyle.text, padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.65rem', fontWeight: '500' }}>
+                        {seniority}
+                      </span>
+                      <span className="badge" style={{ background: '#f1f5f9', color: '#475569', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.65rem', fontWeight: '500' }}>
+                        📍 {ubicacion}
+                      </span>
+                      <span className="badge" style={{ background: '#f1f5f9', color: '#475569', padding: '0.2rem 0.6rem', borderRadius: '20px', fontSize: '0.65rem', fontWeight: '500' }}>
+                        ⏱️ {experiencia}
+                      </span>
+                    </div>
+
+                    {/* Habilidades */}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <p style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                        Habilidades clave:
+                      </p>
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                        {habilidades.slice(0, 4).map((skill, i) => (
+                          <span key={i} className="badge" style={{ background: '#f1f5f9', color: '#475569', padding: '0.2rem 0.5rem', borderRadius: '12px', fontSize: '0.6rem' }}>
+                            {skill}
+                          </span>
+                        ))}
+                        {habilidades.length > 4 && (
+                          <span className="badge" style={{ background: '#f1f5f9', color: '#475569', padding: '0.2rem 0.5rem', borderRadius: '12px', fontSize: '0.6rem' }}>
+                            +{habilidades.length - 4}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer de la tarjeta */}
+                    <div style={{
+                      marginTop: '0.75rem',
+                      paddingTop: '0.5rem',
+                      borderTop: '1px solid #e2e8f0',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '0.65rem',
+                      color: '#64748b'
+                    }}>
+                      <span>🎯 Match score</span>
+                      <span style={{ fontWeight: '700', color: scoreStyle.text }}>{matchScore}%</span>
                     </div>
                   </div>
-
-                  <div style={{
-                    marginTop: '1.5rem',
-                    paddingTop: '1rem',
-                    borderTop: '1px solid #e5e7eb',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    fontSize: '0.85rem',
-                    color: '#666'
-                  }}>
-                    <span>🎯 Match score</span>
-                    <span style={{ fontWeight: '700', color: scoreColor }}>{matchScore}%</span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Mensaje cuando no hay resultados */}
+        {matchResultados.length === 0 && !matchCargando && matchDescripcion && (
+          <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
+            <p>No se encontraron candidatos que coincidan con esta búsqueda.</p>
+            <p style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>Intenta con una descripción más detallada.</p>
+          </div>
+        )}
+      </div>
 
       {/* Modal Ficha del Candidato */}
       {modalOpen && selectedCandidate && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }} onClick={cerrarModal}>
-          <div style={{
-            background: 'white',
-            borderRadius: '24px',
-            maxWidth: '800px',
-            width: '100%',
-            maxHeight: '90vh',
-            overflow: 'auto',
-            padding: '24px'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-                {selectedCandidate._parsed?.datos_crudos?.nombre || selectedCandidate.nombre}
-              </h2>
-              <button onClick={cerrarModal} style={{ fontSize: '24px', cursor: 'pointer' }}>×</button>
-            </div>
-            
-            <div>
-              <p><strong>Profesión:</strong> {selectedCandidate._parsed?.datos_crudos?.profesion_escrita || selectedCandidate.profesion}</p>
-              <p><strong>Ubicación:</strong> {selectedCandidate._parsed?.datos_crudos?.ubicacion || 'No especificada'}</p>
-              <p><strong>Experiencia:</strong> {selectedCandidate._parsed?.interpretacion?.anos_experiencia_deducidos || 'N/A'}</p>
-              <p><strong>Seniority:</strong> {selectedCandidate._parsed?.interpretacion?.seniority || 'N/A'}</p>
-              
-              <div style={{ marginTop: '16px' }}>
-                <strong>Habilidades:</strong>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
-                  {selectedCandidate._parsed?.interpretacion?.habilidades_clave?.map((h, i) => (
-                    <span key={i} style={{ background: '#f0edfe', padding: '4px 12px', borderRadius: '20px', fontSize: '12px' }}>{h}</span>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginTop: '16px' }}>
-                <strong>Perfil interpretado:</strong>
-                <p style={{ marginTop: '8px', color: '#666' }}>{selectedCandidate._parsed?.interpretacion?.perfil_interpretado || 'No disponible'}</p>
-              </div>
-            </div>
+        <div className="modal-overlay" onClick={cerrarModal}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <FichaCandidato 
+              candidato={{
+                ...selectedCandidate,
+                _parsed: selectedCandidate._parsed,
+                id: selectedCandidate.id,
+                archivo: selectedCandidate.archivo
+              }}
+              onClose={cerrarModal}
+              API_URL={API_URL}
+            />
           </div>
         </div>
       )}

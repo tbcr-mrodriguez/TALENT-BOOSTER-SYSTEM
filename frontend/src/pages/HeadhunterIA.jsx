@@ -4,7 +4,6 @@ import FichaCandidato from '../components/FichaCandidato';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
-// Función segura para parsear raw_data
 const safeParseRawData = (data) => {
   if (!data) return {};
   if (typeof data === 'string') {
@@ -29,7 +28,6 @@ const HeadhunterIA = () => {
   const [asistentePensando, setAsistentePensando] = useState(false);
   const mensajesRef = useRef(null);
   
-  // Estados para candidatos
   const [globalData, setGlobalData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -44,14 +42,12 @@ const HeadhunterIA = () => {
     score: ''
   });
 
-  // Auto-scroll para el asistente
   useEffect(() => {
     if (mensajesRef.current) {
       mensajesRef.current.scrollTop = mensajesRef.current.scrollHeight;
     }
   }, [mensajesAsistente]);
 
-  // Cargar candidatos al inicio
   useEffect(() => {
     loadCandidates();
   }, []);
@@ -157,7 +153,6 @@ const HeadhunterIA = () => {
     setPreguntaAsistente('');
   };
 
-  // Función para limpiar filtros
   const limpiarFiltros = () => {
     setFilters({
       nombre: '',
@@ -171,33 +166,25 @@ const HeadhunterIA = () => {
   };
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      flexDirection: 'column',
-      gap: '2rem',
-      height: 'calc(100vh - 100px)',
-      overflow: 'auto'
-    }}>
-      {/* Sección del Headhunter IA */}
-      <div style={{ 
-        background: 'white', 
-        borderRadius: '24px',
-        padding: '1.5rem',
-        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.05)',
-        border: '1px solid #e5e7eb'
-      }}>
-        <div style={{ marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a1a1a' }}>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      
+      {/* ==================== HEADHUNTER IA - CHAT ==================== */}
+      <div className="card-flat" style={{ padding: '1.5rem' }}>
+        <div style={{ marginBottom: '1.25rem' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>
             🤵 Headhunter IA
           </h2>
-          <p style={{ color: '#666' }}>Pregúntame sobre los candidatos en tu pipeline</p>
+          <p style={{ color: '#64748b', fontSize: '0.875rem', marginTop: '4px' }}>
+            Pregúntame sobre los candidatos en tu pipeline
+          </p>
         </div>
 
+        {/* Chat container - Fondo gris suave */}
         <div style={{ 
-          height: '300px', 
+          height: '320px', 
           overflow: 'auto',
           marginBottom: '1rem',
-          background: '#f9fafb',
+          background: '#f8fafc',
           borderRadius: '16px',
           padding: '1rem'
         }}>
@@ -209,12 +196,14 @@ const HeadhunterIA = () => {
               }}>
                 <div style={{
                   display: 'inline-block',
-                  background: msg.tipo === 'usuario' ? '#553BC4' : '#e5e7eb',
-                  color: msg.tipo === 'usuario' ? 'white' : '#1f2937',
+                  background: msg.tipo === 'usuario' ? '#3b82f6' : '#e2e8f0',
+                  color: msg.tipo === 'usuario' ? 'white' : '#1e293b',
                   padding: '0.75rem 1rem',
                   borderRadius: '16px',
                   maxWidth: '80%',
-                  whiteSpace: 'pre-wrap'
+                  whiteSpace: 'pre-wrap',
+                  fontSize: '0.875rem',
+                  lineHeight: 1.5
                 }}>
                   {msg.texto}
                 </div>
@@ -224,11 +213,12 @@ const HeadhunterIA = () => {
               <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
                 <div style={{
                   display: 'inline-block',
-                  background: '#e5e7eb',
-                  color: '#1f2937',
+                  background: '#e2e8f0',
+                  color: '#1e293b',
                   padding: '0.75rem 1rem',
                   borderRadius: '16px'
                 }}>
+                  <span className="spinner" style={{ marginRight: '8px', display: 'inline-block' }}></span>
                   Pensando...
                 </div>
               </div>
@@ -236,9 +226,11 @@ const HeadhunterIA = () => {
           </div>
         </div>
         
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        {/* Input del chat */}
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
           <input
             type="text"
+            className="input-focus"
             placeholder="Pregúntame sobre los candidatos..."
             value={preguntaAsistente}
             onChange={(e) => setPreguntaAsistente(e.target.value)}
@@ -247,103 +239,80 @@ const HeadhunterIA = () => {
             style={{
               flex: 1,
               padding: '0.75rem 1rem',
-              border: '1px solid #e5e7eb',
+              border: '1px solid #e2e8f0',
               borderRadius: '12px',
-              fontSize: '1rem',
-              outline: 'none'
+              fontSize: '0.875rem',
+              outline: 'none',
+              transition: 'all 0.2s'
             }}
           />
           <button 
+            className="btn-primary"
             onClick={enviarPregunta}
             disabled={asistentePensando || !preguntaAsistente.trim()}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: '#553BC4',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: (asistentePensando || !preguntaAsistente.trim()) ? 'not-allowed' : 'pointer',
-              opacity: (asistentePensando || !preguntaAsistente.trim()) ? 0.7 : 1
-            }}
+            style={{ padding: '0.75rem 1.5rem' }}
           >
             Enviar
           </button>
         </div>
       </div>
 
-      {/* Sección de Pipeline de Talento - CON TODAS LAS COLUMNAS ORIGINALES */}
-      <div style={{ 
-        background: 'white', 
-        borderRadius: '24px',
-        padding: '1.5rem',
-        boxShadow: '0 10px 25px -5px rgba(0,0,0,0.05)',
-        border: '1px solid #e5e7eb'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1a1a1a' }}>
+      {/* ==================== PIPELINE DE TALENTO ==================== */}
+      <div className="card-flat" style={{ padding: '1.5rem' }}>
+        
+        {/* Header con acciones */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>
             📋 Pipeline de Talento
           </h2>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button onClick={loadCandidates} style={{
-              padding: '0.5rem 1rem',
-              background: '#f3f4f6',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer'
-            }}>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button onClick={loadCandidates} className="btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.75rem' }}>
               🔄 Actualizar
             </button>
-            <button onClick={limpiarFiltros} style={{
-              padding: '0.5rem 1rem',
-              background: '#ef4444',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer'
-            }}>
+            <button onClick={limpiarFiltros} className="btn-danger" style={{ padding: '0.5rem 1rem', fontSize: '0.75rem' }}>
               ✕ Limpiar filtros
             </button>
           </div>
         </div>
 
-        {/* Filtros por columna - como en el original */}
+        {/* Filtros - Fondo gris suave */}
         <div style={{ 
           display: 'flex', 
-          gap: '0.5rem', 
-          marginBottom: '1rem', 
+          gap: '0.75rem', 
+          marginBottom: '1.5rem', 
           flexWrap: 'wrap',
           padding: '1rem',
-          background: '#f9fafb',
-          borderRadius: '12px',
-          fontSize: '0.8rem'
+          background: '#f8fafc',
+          borderRadius: '12px'
         }}>
           <input
             type="text"
-            placeholder="Filtrar nombre..."
+            placeholder="Nombre..."
             value={filters.nombre}
             onChange={(e) => setFilters({...filters, nombre: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '120px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '110px', fontSize: '0.75rem' }}
           />
           <input
             type="text"
-            placeholder="Filtrar sector..."
+            placeholder="Sector..."
             value={filters.sector}
             onChange={(e) => setFilters({...filters, sector: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '120px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '110px', fontSize: '0.75rem' }}
           />
           <input
             type="text"
-            placeholder="Filtrar experiencia..."
+            placeholder="Experiencia..."
             value={filters.experiencia}
             onChange={(e) => setFilters({...filters, experiencia: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '120px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '110px', fontSize: '0.75rem' }}
           />
           <select
             value={filters.seniority}
             onChange={(e) => setFilters({...filters, seniority: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '110px', fontSize: '0.8rem' }}
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '100px', fontSize: '0.75rem', background: 'white' }}
           >
             <option value="">Seniority</option>
             <option value="senior">Senior</option>
@@ -353,161 +322,125 @@ const HeadhunterIA = () => {
           </select>
           <input
             type="text"
-            placeholder="Filtrar perfil..."
+            placeholder="Perfil..."
             value={filters.perfil}
             onChange={(e) => setFilters({...filters, perfil: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '120px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '110px', fontSize: '0.75rem' }}
           />
           <input
             type="text"
-            placeholder="Filtrar skills..."
+            placeholder="Skills..."
             value={filters.skills}
             onChange={(e) => setFilters({...filters, skills: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '120px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '110px', fontSize: '0.75rem' }}
           />
           <input
             type="number"
-            placeholder="Score mínimo"
+            placeholder="Score mín."
             value={filters.score}
             onChange={(e) => setFilters({...filters, score: e.target.value})}
-            style={{ padding: '0.4rem', border: '1px solid #e5e7eb', borderRadius: '6px', width: '100px', fontSize: '0.8rem' }}
+            className="input-focus"
+            style={{ padding: '0.5rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '8px', width: '90px', fontSize: '0.75rem' }}
           />
         </div>
 
-        {/* Tabla de candidatos - CON TODAS LAS COLUMNAS ORIGINALES */}
-        <div style={{ overflow: 'auto', maxHeight: '400px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead style={{ position: 'sticky', top: 0, background: 'white', borderBottom: '2px solid #e5e7eb' }}>
-              <tr>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Nombre</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Sector</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Experiencia</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Seniority</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Perfil</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Skills</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Score</th>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan="8" style={{ padding: '40px', textAlign: 'center' }}>Cargando candidatos...</td></tr>
-              ) : globalData.filter(filtrarCandidatos).length === 0 ? (
-                <tr><td colSpan="8" style={{ padding: '40px', textAlign: 'center' }}>No hay candidatos</td></tr>
-              ) : (
-                globalData.filter(filtrarCandidatos).map((candidato, idx) => {
-                  let datos = candidato;
-                  if (candidato.raw_data) {
-                    datos = safeParseRawData(candidato.raw_data);
-                  }
-                  const nombre = datos.datos_crudos?.nombre || candidato.nombre || '—';
-                  const sector = datos.interpretacion?.sector_deducido || candidato.sector_principal || '—';
-                  const experiencia = datos.interpretacion?.anos_experiencia_deducidos || candidato.anos_experiencia || '—';
-                  const seniority = datos.interpretacion?.seniority || deducirSeniority(experiencia);
-                  const perfil = datos.interpretacion?.perfil_interpretado || candidato.perfil_profesional || '—';
-                  const habilidades = datos.interpretacion?.habilidades_clave || candidato.habilidades || [];
-                  const score = datos.score || candidato.score || 0;
-                  
-                  let scoreColor = '#dc2626';
-                  if (score >= 80) scoreColor = '#16a34a';
-                  else if (score >= 60) scoreColor = '#2563eb';
-                  else if (score >= 40) scoreColor = '#ca8a04';
+        {/* Tabla de candidatos - Estilo Flat */}
+{/* Tabla de candidatos - Compacta y sin desborde */}
+<div style={{ overflowX: 'auto', width: '100%' }}>
+  <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse' }}>
+    <thead style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+      <tr>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Nombre</th>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Sector / Seniority</th>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Experiencia</th>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Skills</th>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Score</th>
+        <th style={{ padding: '10px 8px', textAlign: 'left', fontSize: '0.75rem', fontWeight: '600', color: '#475569' }}>Acción</th>
+      </tr>
+    </thead>
+    <tbody>
+      {loading ? (
+        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>Cargando...</td></tr>
+      ) : globalData.filter(filtrarCandidatos).length === 0 ? (
+        <tr><td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>No hay candidatos</td></tr>
+      ) : (
+        globalData.filter(filtrarCandidatos).map((candidato, idx) => {
+          let datos = candidato;
+          if (candidato.raw_data) {
+            datos = safeParseRawData(candidato.raw_data);
+          }
+          const nombre = datos.datos_crudos?.nombre || candidato.nombre || '—';
+          const sector = datos.interpretacion?.sector_deducido || candidato.sector_principal || '—';
+          const experiencia = datos.interpretacion?.anos_experiencia_deducidos || candidato.anos_experiencia || '—';
+          const seniority = datos.interpretacion?.seniority || deducirSeniority(experiencia);
+          const habilidades = datos.interpretacion?.habilidades_clave || candidato.habilidades || [];
+          const score = datos.score || candidato.score || 0;
+          
+          let scoreColor = '#dc2626';
+          if (score >= 80) scoreColor = '#16a34a';
+          else if (score >= 60) scoreColor = '#2563eb';
+          else if (score >= 40) scoreColor = '#ca8a04';
 
-                  let seniorityClass = 'badge-trainee';
-                  if (seniority === 'Senior') seniorityClass = 'badge-senior';
-                  else if (seniority === 'Semi-Senior') seniorityClass = 'badge-semi';
-                  else if (seniority === 'Junior') seniorityClass = 'badge-junior';
-
-                  return (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                      <td style={{ padding: '12px', fontWeight: '500' }}>{nombre}</td>
-                      <td style={{ padding: '12px' }}>
-                        <span style={{ background: '#f0edfe', padding: '4px 8px', borderRadius: '20px', fontSize: '12px' }}>{sector}</span>
-                      </td>
-                      <td style={{ padding: '12px' }}>{experiencia}</td>
-                      <td style={{ padding: '12px' }}>
-                        <span className={`badge ${seniorityClass}`} style={{ padding: '4px 8px', borderRadius: '20px', fontSize: '12px' }}>
-                          {seniority}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px', maxWidth: '200px' }}>
-                        <div style={{ 
-                          whiteSpace: 'nowrap', 
-                          overflow: 'hidden', 
-                          textOverflow: 'ellipsis',
-                          maxWidth: '200px'
-                        }}>
-                          {typeof perfil === 'string' ? perfil.substring(0, 60) : '—'}
-                          {(typeof perfil === 'string' && perfil.length > 60) ? '...' : ''}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                          {habilidades.slice(0, 2).map((s, i) => (
-                            <span key={i} style={{ background: '#e5e7eb', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>{s}</span>
-                          ))}
-                          {habilidades.length > 2 && (
-                            <span style={{ background: '#e5e7eb', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>+{habilidades.length-2}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <span style={{ 
-                          background: scoreColor, 
-                          color: 'white', 
-                          padding: '4px 8px', 
-                          borderRadius: '20px', 
-                          fontSize: '12px', 
-                          fontWeight: 'bold' 
-                        }}>
-                          {score}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <button 
-                          onClick={() => verFicha(candidato)}
-                          style={{ 
-                            padding: '6px 12px', 
-                            background: '#553BC4', 
-                            color: 'white', 
-                            border: 'none', 
-                            borderRadius: '8px', 
-                            cursor: 'pointer',
-                            fontSize: '12px'
-                          }}
-                        >
-                          Ver
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+          return (
+            <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+              <td style={{ padding: '10px 8px', fontSize: '0.8rem', fontWeight: '500' }}>{nombre}</td>
+              <td style={{ padding: '10px 8px' }}>
+                <div>
+                  <span style={{ background: '#e0e7ff', padding: '2px 8px', borderRadius: '12px', fontSize: '0.7rem' }}>{sector}</span>
+                  <span style={{ 
+                    marginLeft: '6px',
+                    padding: '2px 8px', 
+                    borderRadius: '12px', 
+                    fontSize: '0.7rem',
+                    background: seniority === 'Senior' ? '#d1fae5' : seniority === 'Semi-Senior' ? '#dbeafe' : seniority === 'Junior' ? '#fef3c7' : '#f3f4f6',
+                    color: seniority === 'Senior' ? '#065f46' : seniority === 'Semi-Senior' ? '#1e40af' : seniority === 'Junior' ? '#92400e' : '#374151'
+                  }}>
+                    {seniority}
+                  </span>
+                </div>
+              </td>
+              <td style={{ padding: '10px 8px', fontSize: '0.8rem', color: '#475569' }}>{experiencia}</td>
+              <td style={{ padding: '10px 8px' }}>
+                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  {habilidades.slice(0, 2).map((s, i) => (
+                    <span key={i} style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>{s}</span>
+                  ))}
+                  {habilidades.length > 2 && (
+                    <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>+{habilidades.length-2}</span>
+                  )}
+                </div>
+              </td>
+              <td style={{ padding: '10px 8px' }}>
+                <span style={{ background: scoreColor, color: 'white', padding: '2px 8px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                  {score}
+                </span>
+              </td>
+              <td style={{ padding: '10px 8px' }}>
+                <button onClick={() => verFicha(candidato)} style={{ background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', padding: '4px 12px', fontSize: '0.7rem', cursor: 'pointer' }}>
+                  Ver
+                </button>
+              </td>
+            </tr>
+          );
+        })
+      )}
+    </tbody>
+  </table>
+</div>
       </div>
 
       {/* Modal Ficha del Candidato */}
       {modalOpen && selectedCandidate && (
-        <div className="modal-overlay" onClick={cerrarModal} style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <FichaCandidato 
-            candidato={selectedCandidate}
-            onClose={cerrarModal}
-            API_URL={API_URL}
-          />
+        <div className="modal-overlay" onClick={cerrarModal}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <FichaCandidato 
+              candidato={selectedCandidate}
+              onClose={cerrarModal}
+              API_URL={API_URL}
+            />
+          </div>
         </div>
       )}
     </div>
