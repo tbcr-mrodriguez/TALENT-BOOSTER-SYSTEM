@@ -35,18 +35,17 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Ruta del portal - SIN LAYOUT, completamente aislada */}
+        <Route path="/candidatos-portal" element={<CandidatosPortal />} />
+        
         {/* Ruta de login (sin layout) */}
         <Route path="/login" element={<Login />} />
         
-        {/* Redirección raíz a login o dashboard */}
+        {/* Redirección raíz a login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         
-        {/* Rutas protegidas con layout */}
-        <Route path="/" element={
-          <ProtectedRoute>
-            <MainLayout />
-          </ProtectedRoute>
-        }>
+        {/* Rutas protegidas con layout - TODAS las rutas internas */}
+        <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route path="talento" element={<TalentoPipeline />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="busqueda-ia" element={<Placeholder title="Búsqueda IA" />} />
@@ -58,7 +57,6 @@ function App() {
           <Route path="admin-empleos" element={<AdminEmpleos />} />
           <Route path="configuracion" element={<Placeholder title="Configuración" />} />
           <Route path="resultados-entrevistas" element={<EntrevistasDashboard />} />
-          <Route path="candidatos-portal" element={<CandidatosPortal />} />
           <Route path="prueba" element={<PruebaDiseno />} />
         </Route>
       </Routes>

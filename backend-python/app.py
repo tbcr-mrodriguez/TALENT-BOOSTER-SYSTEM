@@ -3131,7 +3131,7 @@ def crear_plantilla_v2():
 
 @app.route("/api/entrevista/iniciar-v2", methods=["POST"])
 def iniciar_entrevista_v2():
-    """Inicia una entrevista con plantilla STAR"""
+    """Inicia una entrevista y ENVÍA CORREO al candidato (sin mostrar enlace al reclutador)"""
     try:
         data = request.json
         candidato_id = data.get('candidato_id')
@@ -3142,42 +3142,66 @@ def iniciar_entrevista_v2():
         # Validaciones
         if not candidato_id:
             return jsonify({"success": False, "error": "Falta el ID del candidato"}), 400
-        
         if not plantilla_id:
             return jsonify({"success": False, "error": "Falta el ID de la plantilla"}), 400
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 🔥 VERIFICAR QUE EL CANDIDATO EXISTE
-        cursor.execute("SELECT id, nombre FROM candidates WHERE id = %s", (candidato_id,))
+        # 1. Obtener datos del candidato (incluyendo email)
+        cursor.execute("SELECT id, nombre, raw_data FROM candidates WHERE id = %s", (candidato_id,))
         candidato = cursor.fetchone()
         
         if not candidato:
             conn.close()
-            return jsonify({"success": False, "error": f"El candidato con ID {candidato_id} no existe"}), 404
+            return jsonify({"success": False, "error": "Candidato no encontrado"}), 404
         
-        print(f"✅ Candidato encontrado: {candidato[1]} (ID: {candidato[0]})")
+        candidato_nombre = candidato[1]
+        candidato_raw = candidato[2]
+        if isinstance(candidato_raw, str):
+            candidato_raw = json.loads(candidato_raw)
         
-        # 🔥 VERIFICAR QUE LA PLANTILLA EXISTE
+        # 🔥 EXTRAER EMAIL - CLAVE
+        candidato_email = candidato_raw.get('datos_crudos', {}).get('email')
+        
+        if not candidato_email:
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "El candidato no tiene email registrado. No se puede enviar la invitación."
+            }), 400
+        
+        print(f"✅ Candidato: {candidato_nombre} | Email: {candidato_email}")
+        
+        # 2. Verificar plantilla
         cursor.execute("""
-            SELECT fase_config, perfil_puesto, cultura_empresa, objetivo, 
-                   intentos_por_pregunta, max_advertencias, tiempo_instrucciones
+            SELECT nombre, objetivo, intentos_por_pregunta, max_advertencias, 
+                   tiempo_instrucciones, fase_config, perfil_puesto, cultura_empresa
             FROM plantillas_entrevista_v2 WHERE id = %s
         """, (plantilla_id,))
         plantilla = cursor.fetchone()
         
         if not plantilla:
             conn.close()
-            return jsonify({"success": False, "error": f"La plantilla con ID {plantilla_id} no existe"}), 404
+            return jsonify({"success": False, "error": "Plantilla no encontrada"}), 404
         
-        print(f"✅ Plantilla encontrada: ID {plantilla_id}")
+        plantilla_nombre = plantilla[0]
+        plantilla_objetivo = plantilla[1] or "Evaluación de competencias"
+        intentos_por_pregunta = plantilla[2] or 2
+        max_advertencias = plantilla[3] or 3
+        tiempo_instrucciones = plantilla[4] or 60
+        fase_config = plantilla[5] if isinstance(plantilla[5], list) else (json.loads(plantilla[5]) if plantilla[5] else [])
+        perfil_puesto = plantilla[6] if isinstance(plantilla[6], dict) else (json.loads(plantilla[6]) if plantilla[6] else {})
+        cultura_empresa = plantilla[7] if isinstance(plantilla[7], dict) else (json.loads(plantilla[7]) if plantilla[7] else {})
         
+        print(f"✅ Plantilla: {plantilla_nombre}")
+        
+        # 3. Generar token y enlace
         token = secrets.token_urlsafe(32)
         base_url = request.host_url.rstrip('/')
         enlace = f"{base_url}/entrevista-candidato-v2.html?token={token}"
         
-        # Crear entrevista con metadata
+        # 4. Crear entrevista en BD
         cursor.execute("""
             INSERT INTO entrevistas 
             (candidato_id, plantilla_id, token_acceso, fecha_inicio, estado, enlace_compartido, metadata)
@@ -3190,59 +3214,216 @@ def iniciar_entrevista_v2():
             enlace,
             json.dumps({
                 "tipo": "star",
-                "objetivo": plantilla[3],
-                "perfil_puesto": plantilla[1],
-                "cultura_empresa": plantilla[2],
-                "fases": plantilla[0],
-                "intentos_por_pregunta": plantilla[4] or 2,
-                "max_advertencias": plantilla[5] or 3,
-                "tiempo_instrucciones": plantilla[6] or 60
+                "objetivo": plantilla_objetivo,
+                "perfil_puesto": perfil_puesto,
+                "cultura_empresa": cultura_empresa,
+                "fases": fase_config,
+                "intentos_por_pregunta": intentos_por_pregunta,
+                "max_advertencias": max_advertencias,
+                "tiempo_instrucciones": tiempo_instrucciones
             })
         ))
         
         entrevista_id = cursor.fetchone()[0]
-        print(f"✅ Entrevista creada con ID: {entrevista_id}")
-        
-        # Obtener preguntas
-        cursor.execute("""
-            SELECT id, fase, pregunta, objetivo, criterio_star, competencia, tiempo_maximo, orden,
-                   intentos_permitidos
-            FROM preguntas_entrevista_v2
-            WHERE plantilla_id = %s
-            ORDER BY orden
-        """, (plantilla_id,))
-        
-        preguntas = []
-        for row in cursor.fetchall():
-            preguntas.append({
-                "id": row[0],
-                "fase": row[1] or "General",
-                "pregunta": row[2],
-                "objetivo": row[3] or "",
-                "criterio_star": row[4] or "",
-                "competencia": row[5] or "General",
-                "tiempo_maximo": row[6] or 120,
-                "orden": row[7],
-                "intentos_permitidos": row[8] or 2
-            })
-        
         conn.commit()
         conn.close()
         
-        print(f"✅ Entrevista iniciada exitosamente. Total preguntas: {len(preguntas)}")
+        # 5. 🔥 ENVIAR CORREO FORMAL (este es el único lugar donde el candidato recibe el enlace)
+        from email_service import mailer
         
+        # Extraer puesto para el correo
+        puesto = perfil_puesto.get('titulo', plantilla_nombre)
+        
+        subject = f"📹 Invitación a Entrevista Virtual - {puesto}"
+        
+        body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #1e293b;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: #ffffff;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                    padding: 32px 24px;
+                    text-align: center;
+                }}
+                .header h1 {{
+                    color: white;
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 600;
+                }}
+                .header p {{
+                    color: #94a3b8;
+                    margin: 8px 0 0;
+                }}
+                .content {{
+                    padding: 32px 24px;
+                    background: #ffffff;
+                }}
+                .info-box {{
+                    background: #f8fafc;
+                    border-left: 4px solid #3b82f6;
+                    padding: 20px;
+                    margin: 20px 0;
+                    border-radius: 8px;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+                    color: white !important;
+                    text-decoration: none;
+                    padding: 14px 32px;
+                    border-radius: 12px;
+                    font-weight: 600;
+                    margin: 20px 0;
+                    text-align: center;
+                    box-shadow: 0 4px 12px rgba(59,130,246,0.3);
+                }}
+                .button:hover {{
+                    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+                    transform: translateY(-1px);
+                }}
+                .footer {{
+                    background: #f8fafc;
+                    padding: 24px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #64748b;
+                    border-top: 1px solid #e2e8f0;
+                }}
+                .requirements {{
+                    background: #fef3c7;
+                    padding: 16px;
+                    border-radius: 8px;
+                    margin: 20px 0;
+                }}
+                .requirements h4 {{
+                    margin: 0 0 8px 0;
+                    color: #92400e;
+                }}
+                .requirements ul {{
+                    margin: 0;
+                    padding-left: 20px;
+                }}
+                hr {{
+                    border: none;
+                    border-top: 1px solid #e2e8f0;
+                    margin: 24px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🎯 Talent Pipeline</h1>
+                    <p>Sistema de Evaluación de Talento</p>
+                </div>
+                
+                <div class="content">
+                    <h2>Estimado/a {candidato_nombre},</h2>
+                    
+                    <p>Nos complace invitarlo a participar en el <strong>proceso de evaluación virtual</strong> para el puesto de <strong>{puesto}</strong>.</p>
+                    
+                    <div class="info-box">
+                        <p style="margin: 0 0 12px 0;"><strong>📋 Detalles de la entrevista:</strong></p>
+                        <p style="margin: 4px 0;">• <strong>Formato:</strong> Entrevista asincrónica grabada</p>
+                        <p style="margin: 4px 0;">• <strong>Duración aproximada:</strong> 15-20 minutos</p>
+                        <p style="margin: 4px 0;">• <strong>Completar antes de:</strong> 48 horas</p>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                        <a href="{enlace}" class="button" style="color: white;">🎥 INICIAR ENTREVISTA</a>
+                    </div>
+                    
+                    <div class="requirements">
+                        <h4>⚠️ Requisitos técnicos importantes:</h4>
+                        <ul>
+                            <li>Cámara y micrófono funcionando correctamente</li>
+                            <li>Conexión estable a internet</li>
+                            <li>Lugar tranquilo y bien iluminado</li>
+                            <li>Navegador actualizado (Chrome, Edge, Firefox)</li>
+                        </ul>
+                    </div>
+                    
+                    <p><strong>¿Cómo funciona?</strong></p>
+                    <ol style="margin: 12px 0 12px 20px;">
+                        <li>Haga clic en el botón "INICIAR ENTREVISTA"</li>
+                        <li>Realice la prueba de cámara y micrófono</li>
+                        <li>Responda cada pregunta en el tiempo indicado</li>
+                        <li>Puede repetir cada pregunta hasta {intentos_por_pregunta} veces</li>
+                        <li>Al finalizar, su respuesta se guardará automáticamente</li>
+                    </ol>
+                    
+                    <hr>
+                    
+                    <p style="color: #64748b; font-size: 13px;">
+                        <strong>🔒 Enlace personal e intransferible</strong><br>
+                        Este enlace es único y exclusivo para usted. Por favor, no lo comparta con nadie.
+                    </p>
+                    
+                    <p>Si tiene alguna dificultad técnica o necesita reprogramar, no dude en contactarnos respondiendo a este correo.</p>
+                    
+                    <p style="margin-top: 24px;">
+                        Atentamente,<br>
+                        <strong>Equipo de Selección</strong><br>
+                        Talent Pipeline
+                    </p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2025 Talent Pipeline - Sistema de Gestión de Talento</p>
+                    <p>Este es un mensaje automático, por favor no responder directamente a este correo.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        resultado_correo = mailer.send_email_sync(candidato_email, subject, body, is_html=True)
+        
+        if resultado_correo.get('success'):
+            print(f"📧 Correo de invitación ENVIADO a {candidato_email}")
+            mensaje_correo = "Correo de invitación enviado exitosamente"
+        else:
+            print(f"⚠️ Error enviando correo: {resultado_correo.get('error')}")
+            mensaje_correo = f"Error al enviar correo: {resultado_correo.get('error')}"
+        
+        # 6. Obtener preguntas (para metadata, no se devuelven al frontend si no es necesario)
+        conn2 = get_db_connection()
+        cursor2 = conn2.cursor()
+        cursor2.execute("""
+            SELECT COUNT(*) FROM preguntas_entrevista_v2
+            WHERE plantilla_id = %s
+        """, (plantilla_id,))
+        total_preguntas = cursor2.fetchone()[0]
+        conn2.close()
+        
+        print(f"✅ Entrevista creada ID: {entrevista_id} | Correo: {'ENVIADO' if resultado_correo.get('success') else 'FALLÓ'}")
+        
+        # 🔥 RESPUESTA AL RECLUTADOR (NO incluye el enlace)
         return jsonify({
             "success": True,
             "entrevista_id": entrevista_id,
-            "enlace": enlace,
-            "token": token,
-            "preguntas": preguntas,
-            "metadata": {
-                "objetivo": plantilla[3],
-                "total_preguntas": len(preguntas),
-                "intentos_por_pregunta": plantilla[4] or 2,
-                "max_advertencias": plantilla[5] or 3
-            }
+            "candidato_nombre": candidato_nombre,
+            "candidato_email": candidato_email,
+            "plantilla": plantilla_nombre,
+            "total_preguntas": total_preguntas,
+            "correo_enviado": resultado_correo.get('success', False),
+            "mensaje": mensaje_correo,
+            "mensaje_usuario": f"✅ Invitación enviada a {candidato_email}. El candidato recibirá un correo con el enlace para realizar la entrevista."
         })
         
     except Exception as e:

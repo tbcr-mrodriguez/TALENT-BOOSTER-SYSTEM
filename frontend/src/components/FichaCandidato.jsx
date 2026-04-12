@@ -53,29 +53,35 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
 
   const iniciarEntrevista = async () => {
     if (!plantillaSeleccionada) {
-      alert('Selecciona una plantilla de entrevista');
-      return;
+        alert('Selecciona una plantilla de entrevista');
+        return;
     }
 
     setCargando(true);
     try {
-      const res = await axios.post(`${API_URL}/entrevista/iniciar-v2`, {
-        candidato_id: candidato.id,
-        plantilla_id: plantillaSeleccionada
-      });
+        const res = await axios.post(`${API_URL}/entrevista/iniciar-v2`, {
+            candidato_id: candidato.id,
+            plantilla_id: plantillaSeleccionada
+        });
 
-      if (res.data.success) {
-        window.open(res.data.enlace, '_blank');
-        cerrarModalPlantillas();
-      } else {
-        alert('Error: ' + (res.data.error || 'No se pudo iniciar la entrevista'));
-      }
+        if (res.data.success) {
+            // ✅ Ya no se abre ventana con el enlace
+            // ✅ Se muestra mensaje de confirmación
+            if (res.data.correo_enviado) {
+                alert(`✅ ${res.data.mensaje_usuario || `Invitación enviada a ${res.data.candidato_email}. El candidato recibirá un correo con el enlace para realizar la entrevista.`}`);
+            } else {
+                alert(`⚠️ No se pudo enviar el correo a ${res.data.candidato_email || 'el candidato'}. Error: ${res.data.mensaje || 'Error desconocido'}`);
+            }
+            cerrarModalPlantillas();
+        } else {
+            alert('❌ Error: ' + (res.data.error || 'No se pudo iniciar la entrevista'));
+        }
     } catch (error) {
-      console.error('Error:', error);
-      alert('Error al iniciar la entrevista');
+        console.error('Error:', error);
+        alert('❌ Error al iniciar la entrevista');
     }
     setCargando(false);
-  };
+};
 
   const escapeHtml = (text) => {
     if (!text) return '';

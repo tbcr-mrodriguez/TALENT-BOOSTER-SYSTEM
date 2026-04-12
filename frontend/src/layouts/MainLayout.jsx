@@ -14,8 +14,7 @@ import {
   X,
   FileText,
   LogOut,
-  Bell,
-  User
+  Bell
 } from 'lucide-react';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
@@ -33,13 +32,6 @@ const menuItems = [
   { path: '/admin-empleos', icon: Settings, label: 'Admin Empleos' },
   { path: '/configuracion', icon: Settings, label: 'Configuración' }
 ];
-
-const portalItem = { 
-  path: '/candidatos-portal',  // ← Cambiar a la ruta de React
-  icon: Briefcase, 
-  label: 'Portal del Candidato',
-  external: false  // ← No es externo, es ruta de React
-};
 
 const MainLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -178,9 +170,9 @@ const MainLayout = () => {
             margin: '12px 0'
           }} />
 
-          {/* Portal del Candidato */}
+          {/* Portal del Candidato - Se abre en nueva pestaña SIN el layout */}
           <a
-            href={portalItem.path}
+            href="/candidatos-portal"
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -200,8 +192,8 @@ const MainLayout = () => {
             onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <portalItem.icon size={20} strokeWidth={1.5} />
-            {sidebarOpen && <span>{portalItem.label}</span>}
+            <Briefcase size={20} strokeWidth={1.5} />
+            {sidebarOpen && <span>Portal del Candidato</span>}
           </a>
         </nav>
 
