@@ -1,5 +1,5 @@
 services:
-  # Backend Flask (API)
+  # Backend Flask API
   - type: web
     name: talent-booster-api
     runtime: python
@@ -29,8 +29,9 @@ services:
         value: production
 
   # Frontend React
-  - type: static
+  - type: web
     name: talent-booster-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: build
