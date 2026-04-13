@@ -11,6 +11,12 @@ services:
         fromDatabase:
           name: talent-booster-db
           property: connectionString
+      # 🔥 AGREGA ESTAS DOS LÍNEAS 🔥
+      - key: ALLOWED_ORIGINS
+        value: https://talent-booster-frontend.onrender.com
+      - key: FRONTEND_URL
+        value: https://talent-booster-frontend.onrender.com
+      # El resto sigue igual
       - key: AZURE_TENANT_ID
         sync: false
       - key: AZURE_CLIENT_ID
