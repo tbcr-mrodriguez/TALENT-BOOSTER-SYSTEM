@@ -7,4 +7,6 @@ __pycache__/
 *.dll
 .env
 .env.*
-*.env
+*.envbackend-python/.env.development
+backend-python/.env.production
+frontend/.env

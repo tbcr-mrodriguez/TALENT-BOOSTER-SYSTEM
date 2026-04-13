@@ -53,29 +53,28 @@ else:
     else:
         print("⚠️ No se encontró archivo de configuración")
 
-# Importar configuración centralizada
-from config import (
-    ENVIRONMENT as CFG_ENV,
-    ALLOWED_ORIGINS,
-    MAX_CONTENT_LENGTH,
-    ALLOWED_EXTENSIONS,
-    ALLOWED_VIDEO_EXTENSIONS,
-    RATE_LIMITS_CONFIG,
-    OPENAI_API_KEY,
-    DEEPSEEK_API_KEY,
-    SECRET_KEY,
-    get_database_url,
-    validate_config,
-    print_config
-)
-
 # =====================================================
 # CONFIGURACIÓN DE LA APLICACIÓN
 # =====================================================
 app = Flask(__name__)
 
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-app.config['SECRET_KEY'] = SECRET_KEY
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_urlsafe(32))
+
+# =====================================================
+# CORS CONFIGURACIÓN GENÉRICA (ÚNICA MODIFICACIÓN IMPORTANTE)
+# =====================================================
+# Obtener orígenes permitidos desde variable de entorno
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5001').split(',')
+# Agregar el frontend si está configurado
+if os.environ.get('FRONTEND_URL'):
+    ALLOWED_ORIGINS.append(os.environ.get('FRONTEND_URL'))
+
+CORS(app, 
+     origins=ALLOWED_ORIGINS,
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
 # Headers de seguridad
 @app.after_request
@@ -92,94 +91,7 @@ def add_security_headers(response):
     
     return response
 
-# CORS
-CORS(app, 
-     origins=ALLOWED_ORIGINS,
-     supports_credentials=True,
-     allow_headers=['Content-Type', 'Authorization'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
-
 # Rate limiting
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=RATE_LIMITS_CONFIG['default']
-)
-
-
-
-# =====================================================
-# CONFIGURACIÓN DE CARPETAS (igual que antes)
-# =====================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PARENT_DIR = os.path.dirname(BASE_DIR)
-
-app.template_folder = os.path.join(BASE_DIR, 'templates')
-print(f"📁 Templates folder: {app.template_folder}")
-
-UPLOAD_FOLDER = os.path.join(PARENT_DIR, "uploads")
-VIDEO_UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "entrevistas_video")
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(VIDEO_UPLOAD_FOLDER, exist_ok=True)
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def allowed_video_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
-
-# =====================================================
-# CONEXIÓN A POSTGRESQL
-# =====================================================
-def get_db_connection():
-    database_url = get_database_url()
-    if not database_url:
-        raise ValueError("DATABASE_URL no configurada")
-    return psycopg2.connect(database_url)
-
-# =====================================================
-# EMBEDDINGS
-# =====================================================
-print("🔄 Cargando modelo de embeddings...")
-modelo_embeddings = SentenceTransformer('all-MiniLM-L6-v2')
-print("✅ Modelo cargado")
-
-# =====================================================
-# API KEYS (usando configuración)
-# =====================================================
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-deepseek_client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
-) if DEEPSEEK_API_KEY else None
-
-# Mostrar configuración
-print_config()
-
-# Validar configuración en producción
-if ENVIRONMENT == 'production':
-    if not validate_config():
-        print("❌ Configuración inválida. La aplicación puede no funcionar correctamente.")
-
-# ... EL RESTO DE TU CÓDIGO (funciones y endpoints) CONTINÚA IGUAL ...
-
-
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_urlsafe(32))
-
-
-
-
-# Configuración CORS segura
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://localhost:5001",
-    os.environ.get('FRONTEND_URL', '')
-]
-
-
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
