@@ -64,6 +64,7 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
         plantilla_id: plantillaSeleccionada
     });
     console.log('👤 Candidato completo:', candidato);
+
     setCargando(true);
     try {
         const res = await axios.post(`${API_URL}/entrevista/iniciar-v2`, {
