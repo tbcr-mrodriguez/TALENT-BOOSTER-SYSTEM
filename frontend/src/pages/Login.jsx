@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// =====================================================
+// CONFIGURACIÓN DE API_URL (funciona en desarrollo y producción)
+// =====================================================
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
+
 const Login = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState('email');
@@ -20,7 +25,8 @@ const Login = () => {
     
     setLoading(true);
     try {
-      const res = await axios.post('/api/auth/send-code', { email });
+      // 🔥 AHORA USA API_URL
+      const res = await axios.post(`${API_URL}/auth/send-code`, { email });
       if (res.data.success) {
         setStep('otp');
         setMessage({ text: 'Código enviado a tu correo', type: 'success' });
@@ -57,7 +63,8 @@ const Login = () => {
     
     setLoading(true);
     try {
-      const res = await axios.post('/api/auth/verify-code', { email, code });
+      // 🔥 AHORA USA API_URL
+      const res = await axios.post(`${API_URL}/auth/verify-code`, { email, code });
       if (res.data.success) {
         localStorage.setItem('auth_token', res.data.token);
         localStorage.setItem('user', JSON.stringify(res.data.user));

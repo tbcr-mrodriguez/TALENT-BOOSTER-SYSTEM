@@ -57,6 +57,13 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
         return;
     }
 
+    // 🔥 LOGS PARA DIAGNÓSTICO
+    console.log('📤 Enviando solicitud a:', `${API_URL}/entrevista/iniciar-v2`);
+    console.log('📦 Datos enviados:', {
+        candidato_id: candidato.id,
+        plantilla_id: plantillaSeleccionada
+    });
+    console.log('👤 Candidato completo:', candidato);
     setCargando(true);
     try {
         const res = await axios.post(`${API_URL}/entrevista/iniciar-v2`, {
@@ -64,9 +71,9 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
             plantilla_id: plantillaSeleccionada
         });
 
+        console.log('✅ Respuesta:', res.data);
+
         if (res.data.success) {
-            // ✅ Ya no se abre ventana con el enlace
-            // ✅ Se muestra mensaje de confirmación
             if (res.data.correo_enviado) {
                 alert(`✅ ${res.data.mensaje_usuario || `Invitación enviada a ${res.data.candidato_email}. El candidato recibirá un correo con el enlace para realizar la entrevista.`}`);
             } else {
@@ -77,12 +84,16 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
             alert('❌ Error: ' + (res.data.error || 'No se pudo iniciar la entrevista'));
         }
     } catch (error) {
-        console.error('Error:', error);
-        alert('❌ Error al iniciar la entrevista');
+        console.error('❌ Error completo:', error);
+        if (error.response) {
+            console.error('📄 Respuesta del servidor:', error.response.data);
+            alert(`❌ Error ${error.response.status}: ${error.response.data?.error || error.response.data?.message || 'Error desconocido'}`);
+        } else {
+            alert('❌ Error al iniciar la entrevista: ' + error.message);
+        }
     }
     setCargando(false);
 };
-
   const escapeHtml = (text) => {
     if (!text) return '';
     return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
