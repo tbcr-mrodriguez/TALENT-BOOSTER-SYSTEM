@@ -742,37 +742,117 @@ def api_get_candidate(candidate_id):
 @app.route("/api/analyze", methods=["POST"])
 @limiter.limit("10 per minute")
 def api_analyze():
+    auth_header = request.headers.get('Authorization')
+    expected_token = os.environ.get('ZOHO_WEBHOOK_SECRET')
+        
+    # Si el token está configurado, validarlo
+    if expected_token:
+        if not auth_header or auth_header != f'Bearer {expected_token}':
+            source = request.args.get('source') or request.form.get('source')
+            if source != 'zoho':
+                return jsonify({"success": False, "error": "No autorizado"}), 401
+
     try:
         print("="*50)
         print("📥 PYTHON: Recibida petición de análisis")
-        files = request.files.getlist("files")
+        
+        # 🔥 NUEVO: Intentar obtener archivos de diferentes fuentes
+        files = []
+        
+        # Método 1: Formato normal (desde web frontend)
+        if 'files' in request.files:
+            files = request.files.getlist("files")
+        
+        # Método 2: Formato Zoho (archivo en el body como raw data)
+        elif request.data and len(request.data) > 0:
+            # Si el body es el archivo directamente
+            from werkzeug.datastructures import FileStorage
+            import io
+            
+            file_data = request.data
+            filename = f"zoho_cv_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            
+            file_obj = FileStorage(
+                stream=io.BytesIO(file_data),
+                filename=filename,
+                content_type='application/pdf'
+            )
+            files = [file_obj]
+            print("📥 Archivo recibido desde Zoho (raw data)")
+        
+        # Método 3: JSON con base64 (si Zoho envía JSON)
+        elif request.is_json:
+            data = request.json
+            if data.get('files'):
+                import io
+                import base64
+                from werkzeug.datastructures import FileStorage
+                
+                file_data = data.get('files')
+                filename = data.get('filename', 'zoho_cv.pdf')
+                
+                # Si viene en base64
+                if isinstance(file_data, str) and file_data.startswith('data:'):
+                    # Remover el prefijo data:application/pdf;base64,
+                    if ',' in file_data:
+                        file_data = file_data.split(',')[1]
+                    file_bytes = base64.b64decode(file_data)
+                elif isinstance(file_data, str):
+                    file_bytes = base64.b64decode(file_data)
+                else:
+                    file_bytes = file_data
+                
+                file_obj = FileStorage(
+                    stream=io.BytesIO(file_bytes),
+                    filename=filename,
+                    content_type='application/pdf'
+                )
+                files = [file_obj]
+                print("📥 Archivo recibido desde Zoho (JSON/base64)")
+        
         if not files:
             return jsonify({"success": False, "error": "No se recibieron archivos"}), 400
+        
         if len(files) > 10:
             return jsonify({"success": False, "error": "Máximo 10 archivos por vez"}), 400
+        
         model = request.form.get("model", "gpt")
+        if request.is_json and not model:
+            model = request.json.get("model", "gpt")
+        
         if model not in ['gpt', 'deepseek']:
             model = 'gpt'
+        
         results = []
         for file in files:
             if not allowed_file(file.filename):
-                return jsonify({"success": False, "error": f"Tipo no permitido: {file.filename}"}), 400
+                # Si el nombre no tiene extensión, asumir PDF
+                if not '.' in file.filename:
+                    file.filename = file.filename + '.pdf'
+                if not allowed_file(file.filename):
+                    return jsonify({"success": False, "error": f"Tipo no permitido: {file.filename}"}), 400
+            
             filename = sanitize_filename(file.filename)
             path = os.path.join(UPLOAD_FOLDER, filename)
             file.save(path)
+            
             text = extract_text(path)
             if not text or len(text) < 50:
                 print(f"⚠️ Texto muy corto: {filename}")
                 continue
+            
             data = analyze_cv(text, model)
             data = normalize_lists(data)
             data = score_candidate(data)
             data["archivo"] = filename
             data["fecha_analisis"] = datetime.now().isoformat()
+            
             candidate_id = save_candidate_to_db(data)
             print(f"✅ Candidato guardado con ID: {candidate_id}")
             results.append(data)
+        
         return jsonify({"success": True, "data": results})
+        
     except RequestEntityTooLarge:
         return jsonify({"success": False, "error": "Archivo >16MB"}), 413
     except Exception as e:
@@ -3043,7 +3123,7 @@ def crear_plantilla_v2():
 
 @app.route("/api/entrevista/iniciar-v2", methods=["POST"])
 def iniciar_entrevista_v2():
-    """Inicia una entrevista y ENVÍA CORREO al candidato (sin mostrar enlace al reclutador)"""
+    """Inicia una entrevista SOLO si el candidato no tiene una activa"""
     try:
         data = request.json
         candidato_id = data.get('candidato_id')
@@ -3060,6 +3140,27 @@ def iniciar_entrevista_v2():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # 🔥 VERIFICAR si el candidato ya tiene una entrevista ACTIVA
+        # En la verificación de entrevistas activas, cambia:
+        cursor.execute("""
+        SELECT e.id, e.estado, p.nombre as plantilla_nombre
+        FROM entrevistas e
+        JOIN plantillas_entrevista_v2 p ON e.plantilla_id = p.id
+        WHERE e.candidato_id = %s 
+        AND e.estado IN ('pendiente', 'en_progreso')
+        ORDER BY e.fecha_inicio DESC
+        LIMIT 1
+    """, (candidato_id,))
+        
+        entrevista_activa = cursor.fetchone()
+        
+        if entrevista_activa:
+            conn.close()
+            return jsonify({
+                "success": False,
+                "error": f"El candidato ya tiene una entrevista activa: '{entrevista_activa[2]}'. Debe completarla antes de crear una nueva."
+            }), 400
+        
         # 1. Obtener datos del candidato (incluyendo email)
         cursor.execute("SELECT id, nombre, raw_data FROM candidates WHERE id = %s", (candidato_id,))
         candidato = cursor.fetchone()
@@ -3073,7 +3174,6 @@ def iniciar_entrevista_v2():
         if isinstance(candidato_raw, str):
             candidato_raw = json.loads(candidato_raw)
         
-        # 🔥 EXTRAER EMAIL - CLAVE
         candidato_email = candidato_raw.get('datos_crudos', {}).get('email')
         
         if not candidato_email:
@@ -3140,10 +3240,9 @@ def iniciar_entrevista_v2():
         conn.commit()
         conn.close()
         
-        # 5. 🔥 ENVIAR CORREO FORMAL (este es el único lugar donde el candidato recibe el enlace)
+        # 5. Enviar correo
         from email_service import mailer
         
-        # Extraer puesto para el correo
         puesto = perfil_puesto.get('titulo', plantilla_nombre)
         
         subject = f"📹 Invitación a Entrevista Virtual - {puesto}"
@@ -3253,7 +3352,7 @@ def iniciar_entrevista_v2():
                         <p style="margin: 0 0 12px 0;"><strong>📋 Detalles de la entrevista:</strong></p>
                         <p style="margin: 4px 0;">• <strong>Formato:</strong> Entrevista asincrónica grabada</p>
                         <p style="margin: 4px 0;">• <strong>Duración aproximada:</strong> 15-20 minutos</p>
-                        <p style="margin: 4px 0;">• <strong>Completar antes de:</strong> 48 horas</p>
+                        <p style="margin: 4px 0;">• <strong>Este enlace es de UN SOLO USO</strong> - No podrás acceder nuevamente después de completarla</p>
                     </div>
                     
                     <div style="text-align: center;">
@@ -3313,7 +3412,6 @@ def iniciar_entrevista_v2():
             print(f"⚠️ Error enviando correo: {resultado_correo.get('error')}")
             mensaje_correo = f"Error al enviar correo: {resultado_correo.get('error')}"
         
-        # 6. Obtener preguntas (para metadata, no se devuelven al frontend si no es necesario)
         conn2 = get_db_connection()
         cursor2 = conn2.cursor()
         cursor2.execute("""
@@ -3325,7 +3423,6 @@ def iniciar_entrevista_v2():
         
         print(f"✅ Entrevista creada ID: {entrevista_id} | Correo: {'ENVIADO' if resultado_correo.get('success') else 'FALLÓ'}")
         
-        # 🔥 RESPUESTA AL RECLUTADOR (NO incluye el enlace)
         return jsonify({
             "success": True,
             "entrevista_id": entrevista_id,
@@ -3353,27 +3450,131 @@ def iniciar_entrevista_v2():
 
 @app.route("/api/entrevista/candidato-v2/<token>", methods=["GET"])
 def obtener_entrevista_candidato_v2(token):
-    """Obtiene entrevista para candidato (versión STAR)"""
+    """Obtiene entrevista para candidato - NO cambia el estado aquí"""
     try:
+        token = validate_text_input(token, 100)
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
-        cursor.callproc('obtener_entrevista_por_token_v2', [token])
-        row = cursor.fetchone()
+        # 1. Obtener la entrevista
+        cursor.execute("""
+            SELECT e.id, e.estado, e.candidato_id, e.plantilla_id,
+                   e.token_acceso, e.metadata,
+                   c.nombre as candidato_nombre,
+                   p.nombre as plantilla_nombre,
+                   p.objetivo, p.perfil_puesto, p.cultura_empresa,
+                   p.intentos_por_pregunta, p.max_advertencias
+            FROM entrevistas e
+            JOIN candidates c ON e.candidato_id = c.id
+            JOIN plantillas_entrevista_v2 p ON e.plantilla_id = p.id
+            WHERE e.token_acceso = %s
+        """, (token,))
+        
+        entrevista = cursor.fetchone()
+        
+        if not entrevista:
+            conn.close()
+            return jsonify({"success": False, "error": "❌ Entrevista no encontrada"}), 404
+        
+        # 2. Verificar estados que impiden el acceso
+        if entrevista['estado'] == 'completada':
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "❌ Esta entrevista ya fue completada. El enlace ya no es válido."
+            }), 403
+        
+        if entrevista['estado'] == 'expulsado':
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "❌ Fuiste expulsado de esta entrevista."
+            }), 403
+        
+        if entrevista['estado'] == 'cancelada':
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "❌ Esta entrevista fue cancelada por el reclutador."
+            }), 403
+        
+        # 🔥 IMPORTANTE: NO cambiar estado aquí. Solo permitir acceso si está 'pendiente' o 'en_progreso'
+        if entrevista['estado'] not in ['pendiente', 'en_progreso']:
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "❌ Esta entrevista no está disponible."
+            }), 403
+        if entrevista['estado'] == 'expulsado':
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "❌ Has sido expulsado de esta entrevista por violar las reglas."
+            }), 403        
+
+
+        # 3. Obtener las preguntas (pero NO cambiar estado)
+        cursor.execute("""
+            SELECT id, fase, pregunta, objetivo, criterio_star, competencia, 
+                   tiempo_maximo, orden, intentos_permitidos
+            FROM preguntas_entrevista_v2
+            WHERE plantilla_id = %s
+            ORDER BY orden
+        """, (entrevista['plantilla_id'],))
+        
+        preguntas = cursor.fetchall()
         conn.close()
         
-        if not row or not row[0]:
-            return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
+        # Formatear respuesta
+        preguntas_list = []
+        for p in preguntas:
+            preguntas_list.append({
+                "id": p['id'],
+                "fase": p['fase'] or "General",
+                "pregunta": p['pregunta'],
+                "objetivo": p['objetivo'] or "",
+                "criterio_star": p['criterio_star'] or "",
+                "competencia": p['competencia'] or "General",
+                "tiempo_maximo": p['tiempo_maximo'] or 120,
+                "orden": p['orden'],
+                "intentos_permitidos": p['intentos_permitidos'] or 2
+            })
         
-        entrevista = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        # Parsear metadata
+        metadata = entrevista['metadata']
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except:
+                metadata = {}
         
         return jsonify({
             "success": True,
-            "entrevista": entrevista.get('entrevista')
+            "entrevista": {
+                "id": entrevista['id'],
+                "estado": entrevista['estado'],
+                "candidato_nombre": entrevista['candidato_nombre'],
+                "candidato_id": entrevista['candidato_id'],
+                "plantilla_nombre": entrevista['plantilla_nombre'],
+                "objetivo": entrevista['objetivo'],
+                "perfil_puesto": entrevista['perfil_puesto'],
+                "cultura_empresa": entrevista['cultura_empresa'],
+                "preguntas": preguntas_list,
+                "total_preguntas": len(preguntas_list),
+                "intentos_por_pregunta": entrevista['intentos_por_pregunta'] or 2,
+                "max_advertencias": entrevista['max_advertencias'] or 3,
+                "orden_aleatorio": metadata.get('orden_aleatorio', False),
+                "permite_texto": metadata.get('permite_texto', True),
+                "puede_pausar": metadata.get('puede_pausar', True),
+                "puede_repetir": metadata.get('puede_repetir', True),
+                "tiempo_limite_total": metadata.get('tiempo_limite_total', None)
+            }
         })
         
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -3440,6 +3641,35 @@ def guardar_respuesta_candidato_v2():
     except Exception as e:
         print(f"❌ Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/entrevista/iniciar-progreso/<token>", methods=["POST"])
+def iniciar_progreso_entrevista(token):
+    """Marca la entrevista como 'en_progreso' cuando el candidato comienza realmente"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE entrevistas 
+            SET estado = 'en_progreso', fecha_inicio = NOW()
+            WHERE token_acceso = %s AND estado = 'pendiente'
+            RETURNING id
+        """, (token,))
+        
+        result = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        
+        if result:
+            print(f"✅ Entrevista {result[0]} marcada como 'en_progreso' al comenzar")
+            return jsonify({"success": True, "message": "Entrevista iniciada"})
+        else:
+            return jsonify({"success": False, "error": "No se pudo iniciar la entrevista"}), 400
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500    
 
 
 @app.route("/api/entrevista/candidato/finalizar-v2", methods=["POST"])
@@ -3450,25 +3680,27 @@ def finalizar_entrevista_candidato_v2():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.callproc('finalizar_entrevista_star', [token])
+        # 🔥 Solo permitir finalizar si está 'en_progreso'
+        cursor.execute("""
+            SELECT id, estado FROM entrevistas 
+            WHERE token_acceso = %s AND estado = 'en_progreso'
+        """, (token,))
         row = cursor.fetchone()
         
         if not row:
             conn.close()
-            return jsonify({"success": False, "error": "Entrevista no encontrada"}), 404
+            return jsonify({"success": False, "error": "La entrevista no está en progreso o ya fue completada"}), 400
         
-        # Obtener el ID correctamente
-        if isinstance(row, tuple):
-            entrevista_id = row[0]
-        elif isinstance(row, dict):
-            entrevista_id = row.get('id') or list(row.values())[0]
-        else:
-            entrevista_id = row
+        entrevista_id = row[0]
         
+        cursor.execute("""
+            UPDATE entrevistas 
+            SET estado = 'completada', tiempo_total_fin = NOW()
+            WHERE id = %s
+        """, (entrevista_id,))
         conn.commit()
         conn.close()
         
-        # Disparar análisis en segundo plano
         import threading
         thread = threading.Thread(target=analizar_entrevista_star, args=(entrevista_id,))
         thread.daemon = True
@@ -6971,7 +7203,50 @@ def catch_all(path):
     # Para todo lo demás, servimos index.html (React Router se encarga)
     return render_template('index.html')
 
-
+@app.route("/api/entrevista/cancelar/<int:entrevista_id>", methods=["POST"])
+def cancelar_entrevista(entrevista_id):
+    """Cancela una entrevista pendiente o en progreso"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Verificar que la entrevista existe y no está completada
+        cursor.execute("""
+            SELECT id, estado, candidato_id FROM entrevistas 
+            WHERE id = %s AND estado IN ('pendiente', 'en_progreso')
+        """, (entrevista_id,))
+        
+        entrevista = cursor.fetchone()
+        
+        if not entrevista:
+            conn.close()
+            return jsonify({
+                "success": False, 
+                "error": "Entrevista no encontrada o ya está completada/analizada"
+            }), 404
+        
+        # Cambiar estado a 'cancelada'
+        cursor.execute("""
+            UPDATE entrevistas 
+            SET estado = 'cancelada', 
+                tiempo_total_fin = NOW(),
+                metadata = metadata || jsonb_build_object('cancelada_en', NOW(), 'motivo_cancelacion', 'Manual por reclutador')
+            WHERE id = %s
+        """, (entrevista_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Entrevista {entrevista_id} cancelada exitosamente")
+        
+        return jsonify({
+            "success": True,
+            "message": "Entrevista cancelada exitosamente"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error cancelando entrevista: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # =====================================================
 # INICIO

@@ -20,17 +20,15 @@ import {
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
 
 const menuItems = [
-  { path: '/talento', icon: Users, label: 'Pipeline de Talento' },
+  /*{ path: '/talento', icon: Users, label: 'Pipeline de Talento' },*/
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/busqueda-ia', icon: Search, label: 'Búsqueda IA' },
   { path: '/ai-match', icon: Brain, label: 'AI Match' },
   { path: '/headhunter', icon: MessageSquare, label: 'Headhunter IA' },
   { path: '/entrevistas', icon: Video, label: 'Configuración Entrevistas' },
   { path: '/resultados-entrevistas', icon: FileText, label: 'Resultados Entrevistas' },
   { path: '/correos', icon: Mail, label: 'Correos' },
   { path: '/reclutamiento', icon: Briefcase, label: 'Reclutamiento' },
-  { path: '/admin-empleos', icon: Settings, label: 'Admin Empleos' },
-  { path: '/configuracion', icon: Settings, label: 'Configuración' }
+  { path: '/admin-empleos', icon: Settings, label: 'Admin Empleos' }
 ];
 
 const MainLayout = () => {

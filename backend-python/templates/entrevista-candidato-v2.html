@@ -376,7 +376,6 @@
         .mb-2 { margin-bottom: 8px; }
         .hidden { display: none; }
         
-        /* Robot Avatar */
         .robot-container {
             display: flex;
             align-items: center;
@@ -431,7 +430,6 @@
             animation: pulse 1s infinite;
         }
         
-        /* Texto alternativo */
         .text-response-area {
             margin-top: 16px;
             padding: 12px;
@@ -450,7 +448,6 @@
             font-size: 0.9rem;
         }
         
-        /* Indicador de audio */
         .audio-level {
             height: 4px;
             background: #e2e8f0;
@@ -470,7 +467,6 @@
             background: #3b82f6;
         }
         
-        /* Badges de estado */
         .status-badge {
             display: inline-flex;
             align-items: center;
@@ -614,7 +610,6 @@
                         </div>
                     </div>
                     
-                    <!-- Indicador de nivel de audio -->
                     <div class="audio-level" style="margin-top: 12px;">
                         <div id="entrevistaAudioLevel" class="audio-level-fill" style="width: 0%;"></div>
                     </div>
@@ -631,7 +626,6 @@
                 </div>
                 
                 <div class="question-panel">
-                    <!-- Robot entrevistador -->
                     <div class="robot-container">
                         <div class="robot-avatar" id="robotAvatar">🤖</div>
                         <div class="robot-info">
@@ -648,7 +642,6 @@
                     
                     <div id="intentosInfo" style="font-size: 0.7rem; color: #64748b; margin-bottom: 12px;"></div>
                     
-                    <!-- Badge de estado actual -->
                     <div style="text-align: center; margin-bottom: 12px;">
                         <span id="estadoBadge" class="status-badge idle">⏳ Esperando</span>
                     </div>
@@ -665,12 +658,10 @@
                         <button id="btnCancelar" class="btn btn-outline" style="display: none;">❌ Cancelar</button>
                     </div>
                     
-                    <!-- ✅ BOTÓN SIGUIENTE - AHORA EN EL LUGAR CORRECTO ✅ -->
                     <div class="btn-group">
                         <button id="btnSiguiente" class="btn btn-success" style="display: none;">➡️ Siguiente pregunta</button>
                     </div>
                     
-                    <!-- Área de respuesta por texto -->
                     <div id="textResponseArea" class="text-response-area" style="display: none;">
                         <textarea id="textResponse" rows="4" placeholder="Escribe tu respuesta aquí..."></textarea>
                         <div class="btn-group" style="margin-top: 12px;">
@@ -685,7 +676,6 @@
         </div>
     </div>
 
-    <!-- Modal de expulsión -->
     <div id="expulsionModal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
             <div class="modal-icon">🚫</div>
@@ -708,9 +698,7 @@
         let puedePausar = true;
         let puedeRepetir = true;
         let permiteTexto = true;
-        let ordenAleatorio = false;
         let tiempoLimiteTotal = null;
-        let preguntasOriginales = [];
         
         let stream = null;
         let recorder = null;
@@ -729,6 +717,7 @@
         let estaGrabando = false;
         let estaPausado = false;
         let autoSaveInterval = null;
+        let entrevistaIniciada = false;
         
         // Elementos DOM
         const testScreen = document.getElementById('testScreen');
@@ -771,6 +760,7 @@
         const btnReintentarTest = document.getElementById('btnReintentarTest');
         const audioLevelFill = document.getElementById('audioLevelFill');
         const btnSiguiente = document.getElementById('btnSiguiente');
+        const btnIniciar = document.getElementById('btnIniciarEntrevista');
         
         let testStream = null;
         let testAudioContext = null;
@@ -797,7 +787,6 @@
                 cameraStatus.textContent = '✅ Cámara funcionando correctamente';
                 cameraStatus.style.color = '#10b981';
                 
-                // Detectar nivel de audio
                 if (testAudioContext) await testAudioContext.close();
                 testAudioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const source = testAudioContext.createMediaStreamSource(testStream);
@@ -1002,11 +991,12 @@
                     return;
                 }
                 
-                // Recuperar progreso guardado
-                recuperarProgresoLocal();
+                console.log('🔍 Cargando entrevista con token:', token);
                 
                 const res = await fetch(`/api/entrevista/candidato-v2/${token}`);
                 const data = await res.json();
+                
+                console.log('📦 Respuesta:', data);
                 
                 if (!data.success) {
                     mostrarError(data.error || 'Error al cargar la entrevista');
@@ -1014,50 +1004,70 @@
                 }
                 
                 entrevistaData = data.entrevista;
-                preguntasOriginales = data.entrevista.preguntas || [];
+                preguntas = entrevistaData.preguntas || [];
                 
-                if (!preguntasOriginales || preguntasOriginales.length === 0) {
+                console.log('✅ Entrevista cargada, preguntas:', preguntas.length);
+                
+                if (preguntas.length === 0) {
                     mostrarError('No hay preguntas para esta entrevista');
                     return;
                 }
                 
-                // Configurar orden (aleatorio o secuencial)
-                ordenAleatorio = data.entrevista.orden_aleatorio || false;
-                if (ordenAleatorio) {
-                    preguntas = [...preguntasOriginales];
-                    for (let i = preguntas.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [preguntas[i], preguntas[j]] = [preguntas[j], preguntas[i]];
-                    }
-                } else {
-                    preguntas = preguntasOriginales;
-                }
-                
-                intentosPermitidos = data.entrevista.intentos_por_pregunta || 2;
-                maxAdvertencias = data.entrevista.max_advertencias || 3;
-                puedePausar = data.entrevista.puede_pausar !== false;
-                puedeRepetir = data.entrevista.puede_repetir !== false;
-                permiteTexto = data.entrevista.permite_texto !== false;
-                tiempoLimiteTotal = data.entrevista.tiempo_limite_total || null;
+                intentosPermitidos = entrevistaData.intentos_por_pregunta || 2;
+                maxAdvertencias = entrevistaData.max_advertencias || 3;
                 
                 if (loadingState) loadingState.style.display = 'none';
                 if (mainContent) mainContent.style.display = 'block';
-                if (entrevistaContainer) entrevistaContainer.style.display = 'block';
-                if (instruccionesScreen) instruccionesScreen.style.display = 'none';
                 
-                setupAntiCheat();
-                tiempoTotalInicio = Date.now();
-                tiempoTotalInterval = setInterval(actualizarTiempoTotal, 1000);
-                
-                // Configurar auto-save cada 15 segundos
-                if (autoSaveInterval) clearInterval(autoSaveInterval);
-                autoSaveInterval = setInterval(autoSave, 15000);
-                
-                mostrarPregunta(preguntaActual);
+                // Configurar el botón de comenzar
+                if (btnIniciar) {
+                    const newBtn = btnIniciar.cloneNode(true);
+                    btnIniciar.parentNode.replaceChild(newBtn, btnIniciar);
+                    newBtn.onclick = comenzarEntrevistaReal;
+                }
                 
             } catch (error) {
                 console.error('Error:', error);
                 mostrarError('Error de conexión: ' + error.message);
+            }
+        }
+        
+        async function comenzarEntrevistaReal() {
+            if (entrevistaIniciada) return;
+            entrevistaIniciada = true;
+            
+            console.log('🎬 Comenzando entrevista real...');
+            
+            try {
+                const res = await fetch(`/api/entrevista/iniciar-progreso/${token}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await res.json();
+                console.log('📦 Respuesta inicio:', data);
+                
+                if (!data.success) {
+                    mostrarError(data.error || 'No se pudo iniciar la entrevista');
+                    entrevistaIniciada = false;
+                    return;
+                }
+                
+                if (instruccionesScreen) instruccionesScreen.style.display = 'none';
+                if (entrevistaContainer) entrevistaContainer.style.display = 'block';
+                
+                tiempoTotalInicio = Date.now();
+                tiempoTotalInterval = setInterval(actualizarTiempoTotal, 1000);
+                autoSaveInterval = setInterval(autoSave, 15000);
+                
+                setupAntiCheat();
+                
+                mostrarPregunta(0);
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                mostrarError('Error al iniciar la entrevista: ' + error.message);
+                entrevistaIniciada = false;
             }
         }
         
@@ -1074,7 +1084,6 @@
             if (preguntasRestantesSpan) preguntasRestantesSpan.textContent = `Preguntas restantes: ${preguntas.length - index - 1}`;
             if (progresoBar) progresoBar.style.width = `${((index + 1) / preguntas.length) * 100}%`;
             
-            // Ocultar botón siguiente al mostrar nueva pregunta
             if (btnSiguiente) btnSiguiente.style.display = 'none';
             
             intentosActual = 0;
@@ -1084,7 +1093,6 @@
             if (intentosInfo) intentosInfo.textContent = `Intentos disponibles: ${intentosPermitidos}`;
             if (feedbackMensaje) feedbackMensaje.textContent = '';
             
-            // Resetear UI
             if (btnGrabar) btnGrabar.style.display = 'block';
             if (btnPausar) btnPausar.style.display = 'none';
             if (btnDetener) btnDetener.style.display = 'none';
@@ -1230,10 +1238,8 @@
                 if (recordingIndicator) recordingIndicator.style.display = 'none';
                 if (btnCancelar) btnCancelar.style.display = 'none';
                 
-                // ✅ Mostrar botón Siguiente después de grabar
                 if (btnSiguiente) btnSiguiente.style.display = 'block';
                 
-                // Mostrar botón Repetir solo si quedan intentos
                 if (intentosActual + 1 < intentosPermitidos && puedeRepetir) {
                     if (btnRepetir) btnRepetir.style.display = 'block';
                     if (feedbackMensaje) feedbackMensaje.textContent = `✅ Respuesta guardada. Tienes ${intentosPermitidos - intentosActual - 1} intento(s) restante(s).`;
@@ -1490,7 +1496,6 @@
         // ========================================
         // EVENT LISTENERS
         // ========================================
-        const btnIniciar = document.getElementById('btnIniciarEntrevista');
         if (btnIniciar) {
             btnIniciar.onclick = () => {
                 console.log('🔍 Iniciando entrevista...');
