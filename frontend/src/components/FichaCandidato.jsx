@@ -36,11 +36,14 @@ const FichaCandidato = ({ candidato, onClose, API_URL }) => {
 
   const verCV = () => {
     if (candidato.archivo) {
-      window.open(`${API_URL}/view-cv/${encodeURIComponent(candidato.archivo)}`, '_blank');
+        // ✅ CORRECTO: incluir /api/ en la ruta
+        const cvUrl = `${API_URL}/view-cv/${encodeURIComponent(candidato.archivo)}`;
+        console.log('URL construida:', cvUrl);
+        window.open(cvUrl, '_blank');
     } else {
-      alert('No hay archivo asociado a este candidato');
+        alert('No hay archivo asociado a este candidato');
     }
-  };
+};
 
   const abrirModalPlantillas = () => {
     setMostrarModalPlantillas(true);

@@ -632,14 +632,55 @@ def generar_embedding_candidato(data, candidate_id):
         traceback.print_exc()
         return False
 
-def save_candidate_to_db(data):
+def save_candidate_to_db(data, fuente='desconocida'):
+    """Guarda candidato en BD con tags y fuente"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # Extraer habilidades como tags
+        tags = []
+        interp = data.get('interpretacion', {})
+        habilidades = interp.get('habilidades_clave', [])
+        seniority = interp.get('seniority', '')
+        sector = interp.get('sector_deducido', '')
+        
+        # Construir tags
+        if habilidades:
+            tags.extend([h.lower() for h in habilidades[:5]])  # Top 5 habilidades
+        if seniority:
+            tags.append(seniority.lower())
+        if sector:
+            tags.append(sector.lower())
+        
+        # Eliminar duplicados
+        tags = list(set(tags))
+        
+        # Agregar tags y fuente al raw_data
+        if 'metadata' not in data:
+            data['metadata'] = {}
+        data['metadata']['tags'] = tags
+        data['metadata']['fuente'] = fuente
+        data['metadata']['fecha_carga'] = datetime.now().isoformat()
+        
         cursor.callproc('crear_candidato', [data['archivo'], json.dumps(data, ensure_ascii=False)])
         candidate_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
+        
+        # Actualizar las columnas nuevas directamente (si la función no lo hace)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE candidates 
+            SET tags = %s::text[], 
+                fuente = %s, 
+                fecha_carga = COALESCE(fecha_carga, %s)
+            WHERE id = %s
+        """, (tags, fuente, datetime.now(), candidate_id))
+        conn.commit()
+        conn.close()
+        
         generar_embedding_candidato(data, candidate_id)
         return candidate_id
     except Exception as e:
@@ -847,7 +888,15 @@ def api_analyze():
             data["archivo"] = filename
             data["fecha_analisis"] = datetime.now().isoformat()
             
-            candidate_id = save_candidate_to_db(data)
+            fuente = 'portal'  # Si viene del frontend
+            if request.headers.get('Authorization') and 'zoho' in request.headers.get('Authorization', '').lower():
+                fuente = 'zoho'
+            elif request.form.get('source') == 'zoho':
+                fuente = 'zoho'
+            elif request.is_json and request.json.get('source') == 'zoho':
+                fuente = 'zoho'
+
+            candidate_id = save_candidate_to_db(data, fuente=fuente)
             print(f"✅ Candidato guardado con ID: {candidate_id}")
             results.append(data)
         
@@ -921,12 +970,17 @@ def api_view_cv(filename):
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         real_path = os.path.realpath(file_path)
         upload_real = os.path.realpath(UPLOAD_FOLDER)
+        
+        print(f"🔍 Buscando CV: {file_path}")
+        print(f"   ¿Existe? {os.path.exists(file_path)}")
+        
         if not real_path.startswith(upload_real):
             return jsonify({"success": False, "error": "Acceso denegado"}), 403
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": "File not found"}), 404
         return send_file(file_path)
     except Exception as e:
+        print(f"❌ Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route("/api/search-embedding", methods=["POST"])
@@ -1545,6 +1599,9 @@ def test_page():
 def match_empleo():
     """Encuentra los mejores candidatos para una descripción de empleo usando ChatGPT"""
     try:
+        import time
+        import gc
+        
         data = request.json
         descripcion = data.get('descripcion', '')
         titulo = data.get('titulo', 'Posición')
@@ -1585,7 +1642,8 @@ Devuelve SOLO JSON con:
         if not consulta:
             consulta = descripcion[:200]
         
-        candidatos = buscar_por_embedding(consulta, cantidad * 3)
+        # 🔥 Reducido: antes cantidad * 3, ahora cantidad * 2
+        candidatos = buscar_por_embedding(consulta, cantidad * 2)
         print(f"📊 Candidatos encontrados por embedding: {len(candidatos)}")
         
         if not candidatos:
@@ -1599,7 +1657,10 @@ Devuelve SOLO JSON con:
         # Paso 3: Evaluar cada candidato con ChatGPT
         resultados = []
         
-        for c in candidatos[:15]:  # Limitar a 15 para no saturar la API
+        # 🔥 REDUCIDO: antes 15, ahora 10 (sin perder habilidades)
+        for i, c in enumerate(candidatos[:10]):
+            print(f"📊 Evaluando candidato {i+1}/10...")
+            
             # Parsear raw_data para obtener el perfil completo
             try:
                 if c.get('raw_data'):
@@ -1609,12 +1670,14 @@ Devuelve SOLO JSON con:
             except:
                 datos = c
             
-            # Construir perfil del candidato para ChatGPT
+            # Construir perfil del candidato (con TODAS las habilidades y fortalezas)
             nombre = datos.get('datos_crudos', {}).get('nombre', c.get('nombre', 'N/A'))
             profesion = datos.get('datos_crudos', {}).get('profesion_escrita', c.get('profesion', 'N/A'))
             experiencia = datos.get('interpretacion', {}).get('anos_experiencia_deducidos', 'No especificada')
             seniority = datos.get('interpretacion', {}).get('seniority', 'No especificado')
+            # ✅ Mantiene TODAS las habilidades
             habilidades = datos.get('interpretacion', {}).get('habilidades_clave', [])
+            # ✅ Mantiene TODAS las fortalezas
             fortalezas = datos.get('interpretacion', {}).get('fortalezas', [])
             perfil = datos.get('interpretacion', {}).get('perfil_interpretado', '')
             ubicacion = datos.get('datos_crudos', {}).get('ubicacion', 'No especificada')
@@ -1676,6 +1739,12 @@ Sé honesto y crítico. Si el candidato no calza, dale un score bajo.
                 
                 resultados.append(c)
                 print(f"✅ {nombre}: {c['match_score']}% match")
+                
+                # 🔥 Liberar memoria después de cada iteración
+                gc.collect()
+                
+                # 🔥 Pequeña pausa para liberar recursos
+                time.sleep(0.3)
                 
             except Exception as e:
                 print(f"❌ Error evaluando {nombre}: {e}")
@@ -4410,7 +4479,7 @@ def api_obtener_puesto(puesto_id):
 
 @app.route("/api/postular", methods=["POST"])
 def api_postular():
-    """Postula un candidato a un puesto - PROCESO COMPLETO ASÍNCRONO"""
+    """Postula un candidato a un puesto - PROCESO COMPLETO ASÍNCRONO con preservación de datos del formulario"""
     try:
         nombre = request.form.get('nombre')
         email = request.form.get('email')
@@ -4424,7 +4493,7 @@ def api_postular():
                 pregunta_id = key.replace('respuesta_', '')
                 respuestas[pregunta_id] = value
         
-        # ✅ Guardar archivo TEMPORALMENTE (sin procesar)
+        # Guardar archivo temporalmente
         cv_filename = None
         cv_temp_path = None
         
@@ -4435,9 +4504,27 @@ def api_postular():
                 cv_filename = f"candidato_{timestamp}_{secure_filename(cv_file.filename)}"
                 cv_path = os.path.join(UPLOAD_FOLDER, cv_filename)
                 cv_file.save(cv_path)
-                cv_temp_path = cv_path  # Guardar para procesar en background
+                cv_temp_path = cv_path
         
-        # ✅ Buscar candidato por email (rápido, solo consulta DB)
+        # 🔥 DATOS DEL FORMULARIO (se guardan como backup)
+        datos_iniciales = {
+            "datos_crudos": {
+                "nombre": nombre,
+                "email": email,
+                "telefono": telefono
+            },
+            "formulario_original": {
+                "nombre": nombre,
+                "email": email,
+                "telefono": telefono,
+                "puesto_id": puesto_id,
+                "fecha_registro": datetime.now().isoformat()
+            },
+            "archivo": cv_filename,
+            "estado_procesamiento": "pendiente"
+        }
+        
+        # Buscar candidato por email
         candidate_id = None
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -4445,31 +4532,23 @@ def api_postular():
         if email:
             cursor.execute("""
                 SELECT c.id FROM candidates c
-                WHERE c.raw_data::jsonb->'datos_crudos'->>'email' = %s
+                WHERE c.raw_data::jsonb->'formulario_original'->>'email' = %s
                 LIMIT 1
             """, (email,))
             row = cursor.fetchone()
             if row:
                 candidate_id = row[0]
         
-        # ✅ Si no existe, crear candidato MÍNIMO (solo metadatos)
+        # Si no existe, crear candidato con los datos del formulario
         if not candidate_id:
             cursor.execute("""
-                INSERT INTO candidates (archivo, nombre, raw_data, fecha_analisis)
-                VALUES (%s, %s, %s, NOW())
+                INSERT INTO candidates (archivo, nombre, raw_data, fecha_analisis, tags, fuente, fecha_carga)
+                VALUES (%s, %s, %s, NOW(), %s::text[], %s, %s)
                 RETURNING id
-            """, (cv_filename, nombre, json.dumps({
-                "datos_crudos": {
-                    "nombre": nombre,
-                    "email": email,
-                    "telefono": telefono
-                },
-                "archivo": cv_filename,
-                "estado_procesamiento": "pendiente"  # ← Nuevo campo para saber que falta analizar
-            })))
+            """, (cv_filename, nombre, json.dumps(datos_iniciales), [], "postulacion", datetime.now()))
             candidate_id = cursor.fetchone()[0]
         
-        # ✅ Verificar postulación duplicada (rápido)
+        # Verificar postulación duplicada
         cursor.execute("""
             SELECT 1 FROM postulaciones 
             WHERE candidato_id = %s AND puesto_id = %s
@@ -4481,7 +4560,7 @@ def api_postular():
                 "error": "Ya has postulado a este puesto anteriormente"
             })
         
-        # ✅ Crear postulación (rápido)
+        # Crear postulación
         cursor.execute("""
             INSERT INTO postulaciones (candidato_id, puesto_id, respuestas_formulario, cv_filename, estado)
             VALUES (%s, %s, %s, %s, 'pendiente')
@@ -4492,8 +4571,7 @@ def api_postular():
         conn.commit()
         conn.close()
         
-        # 🔥 DISPARAR PROCESAMIENTO COMPLETO EN SEGUNDO PLANO
-        # Incluyendo: extraer texto del CV, llamar a GPT, generar embeddings, etc.
+        # 🔥 DISPARAR PROCESAMIENTO EN SEGUNDO PLANO
         import threading
         thread = threading.Thread(
             target=procesar_postulacion_completa_background,
@@ -4501,10 +4579,9 @@ def api_postular():
         )
         thread.daemon = True
         thread.start()
-
+        
         print(f"✅ Thread iniciado para postulación {postulacion_id}")
         
-        # ✅ Respuesta inmediata (menos de 1 segundo)
         return jsonify({
             "success": True,
             "message": "Postulación recibida exitosamente. Estamos analizando tu CV, te notificaremos por correo cuando esté listo.",
@@ -4518,7 +4595,7 @@ def api_postular():
         return jsonify({"success": False, "error": str(e)}), 500
     
 def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_path, email, nombre, telefono):
-    """Procesa la postulación en segundo plano - extrae CV, analiza con IA, genera embedding"""
+    """Procesa la postulación en segundo plano - preserva datos del formulario"""
     import time
     
     print("=" * 70)
@@ -4532,7 +4609,6 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
     
     try:
         # ===== PASO 1: Marcar postulación como 'procesando' =====
-        print("[1/6] Actualizando estado a 'procesando'...")
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -4544,37 +4620,68 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
         conn.close()
         print("✅ [1/6] Estado actualizado a 'procesando'")
         
-        # ===== PASO 2: Extraer texto del CV =====
+        # ===== PASO 2: Obtener datos actuales del candidato (incluyendo formulario_original) =====
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT raw_data FROM candidates WHERE id = %s", (candidate_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        datos_actuales = row['raw_data'] if row else {}
+        if isinstance(datos_actuales, str):
+            datos_actuales = json.loads(datos_actuales)
+        
+        # 🔥 PRESERVAR DATOS DEL FORMULARIO ORIGINAL
+        formulario_original = datos_actuales.get('formulario_original', {
+            "nombre": nombre,
+            "email": email,
+            "telefono": telefono,
+            "fecha_registro": datetime.now().isoformat()
+        })
+        
+        # ===== PASO 3: Extraer texto del CV =====
         texto_cv = ""
         if cv_path and os.path.exists(cv_path):
             print(f"[2/6] Extrayendo texto del CV: {cv_path}")
             texto_cv = extract_text(cv_path)
             print(f"✅ [2/6] Texto extraído: {len(texto_cv)} caracteres")
-        else:
-            print(f"⚠️ [2/6] No hay CV para procesar en: {cv_path}")
         
-        # ===== PASO 3: Analizar CV con IA (si hay texto suficiente) =====
+        # ===== PASO 4: Analizar CV con IA =====
         datos_actualizados = None
         
         if texto_cv and len(texto_cv) > 100:
             print("[3/6] Analizando CV con IA (esto toma 5-10 segundos)...")
             try:
-                datos_actualizados = analyze_cv(texto_cv, "gpt")
-                datos_actualizados = normalize_lists(datos_actualizados)
-                datos_actualizados = score_candidate(datos_actualizados)
-                datos_actualizados["archivo"] = os.path.basename(cv_path) if cv_path else None
-                datos_actualizados["fecha_analisis"] = datetime.now().isoformat()
-                datos_actualizados["estado_procesamiento"] = "completado"
-                print(f"✅ [3/6] Análisis IA completado. Score: {datos_actualizados.get('score', 0)}")
+                datos_ia = analyze_cv(texto_cv, "gpt")
+                datos_ia = normalize_lists(datos_ia)
+                datos_ia = score_candidate(datos_ia)
+                
+                # 🔥 COMBINAR: Datos del CV + Datos del formulario (el formulario tiene prioridad)
+                datos_actualizados = {
+                    "datos_crudos": {
+                        **datos_ia.get('datos_crudos', {}),
+                        "nombre": formulario_original.get('nombre', nombre),
+                        "email": formulario_original.get('email', email),
+                        "telefono": formulario_original.get('telefono', telefono)
+                    },
+                    "interpretacion": datos_ia.get('interpretacion', {}),
+                    "formulario_original": formulario_original,
+                    "archivo": os.path.basename(cv_path) if cv_path else None,
+                    "fecha_analisis": datetime.now().isoformat(),
+                    "estado_procesamiento": "completado",
+                    "texto_completo_cv": texto_cv
+                }
+                print(f"✅ [3/6] Análisis IA completado. Score: {datos_ia.get('score', 0)}")
             except Exception as e:
                 print(f"❌ [3/6] Error en IA: {e}")
                 datos_actualizados = {
                     "datos_crudos": {
-                        "nombre": nombre,
-                        "email": email,
-                        "telefono": telefono
+                        "nombre": formulario_original.get('nombre', nombre),
+                        "email": formulario_original.get('email', email),
+                        "telefono": formulario_original.get('telefono', telefono)
                     },
                     "interpretacion": {},
+                    "formulario_original": formulario_original,
                     "estado_procesamiento": "error_ia",
                     "archivo": os.path.basename(cv_path) if cv_path else None
                 }
@@ -4582,43 +4689,44 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
             print(f"⚠️ [3/6] Texto insuficiente ({len(texto_cv)} chars), saltando análisis IA")
             datos_actualizados = {
                 "datos_crudos": {
-                    "nombre": nombre,
-                    "email": email,
-                    "telefono": telefono
+                    "nombre": formulario_original.get('nombre', nombre),
+                    "email": formulario_original.get('email', email),
+                    "telefono": formulario_original.get('telefono', telefono)
                 },
                 "interpretacion": {},
+                "formulario_original": formulario_original,
                 "estado_procesamiento": "sin_texto_suficiente",
                 "archivo": os.path.basename(cv_path) if cv_path else None
             }
         
-        # ===== PASO 4: Actualizar candidato en BD =====
+        # ===== PASO 5: Actualizar candidato en BD =====
         print("[4/6] Actualizando candidato en BD...")
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Obtener profesión del análisis
-        profesion = ""
-        if datos_actualizados.get('datos_crudos'):
-            profesion = datos_actualizados['datos_crudos'].get('profesion_escrita', '')
+        profesion = datos_actualizados.get('datos_crudos', {}).get('profesion_escrita', '')
+        score = datos_actualizados.get('score', 0)
         
         cursor.execute("""
             UPDATE candidates 
             SET raw_data = %s::jsonb, 
                 nombre = %s,
                 profesion = %s,
+                score = %s,
                 fecha_analisis = NOW()
             WHERE id = %s
         """, (
             json.dumps(datos_actualizados, ensure_ascii=False),
             datos_actualizados.get('datos_crudos', {}).get('nombre', nombre),
             profesion,
+            score,
             candidate_id
         ))
         conn.commit()
         conn.close()
         print("✅ [4/6] Candidato actualizado")
         
-        # ===== PASO 5: Generar embedding para búsqueda semántica =====
+        # ===== PASO 6: Generar embedding =====
         print("[5/6] Generando embedding para búsqueda semántica...")
         try:
             generar_embedding_candidato(datos_actualizados, candidate_id)
@@ -4626,11 +4734,9 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
         except Exception as e:
             print(f"⚠️ [5/6] Error generando embedding: {e}")
         
-        # ===== PASO 6: Calcular match score y finalizar =====
-        # ===== PASO 6: Calcular match score Y guardar análisis completo =====
-        print("[6/6] Calculando match score y análisis detallado...")
+        # ===== PASO 7: Calcular match score =====
+        print("[6/6] Calculando match score...")
         
-        # Obtener el puesto_id de la postulación
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT puesto_id FROM postulaciones WHERE id = %s", (postulacion_id,))
@@ -4638,55 +4744,31 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
         puesto_id = row[0] if row else None
         conn.close()
         
-        # Variables para almacenar resultados
         match_score = datos_actualizados.get('score', 50)
-        analisis_completo = None
         
-        # Si hay puesto_id, calcular match detallado con IA
         if puesto_id:
             try:
-                # Llamar a la función que devuelve el análisis COMPLETO
                 resultado_match = calcular_match_detallado_con_ia(candidate_id, puesto_id)
                 match_score = resultado_match.get('score', match_score)
-                analisis_completo = resultado_match.get('analisis', {})
                 print(f"✅ Match calculado con IA: {match_score}%")
-                print(f"📊 Análisis detallado generado")
             except Exception as e:
-                print(f"⚠️ Error en match IA, usando score base: {e}")
-                # Si falla, crear análisis básico
-                analisis_completo = {
-                    "resumen": f"Candidato con score {match_score}%",
-                    "fortalezas": datos_actualizados.get('interpretacion', {}).get('fortalezas', []),
-                    "debilidades": datos_actualizados.get('interpretacion', {}).get('areas_mejora', []),
-                    "recomendacion": "Revisar manualmente",
-                    "fecha_analisis": datetime.now().isoformat()
-                }
-        else:
-            # Análisis básico si no hay puesto
-            analisis_completo = {
-                "resumen": "Postulación recibida, pendiente de asignar a puesto",
-                "fortalezas": datos_actualizados.get('interpretacion', {}).get('fortalezas', []),
-                "debilidades": [],
-                "recomendacion": "Asignar a un puesto para evaluar",
-                "fecha_analisis": datetime.now().isoformat()
-            }
+                print(f"⚠️ Error en match IA: {e}")
         
-        # ACTUALIZAR postulación con match_score Y análisis completo
+        # Actualizar postulación
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE postulaciones 
             SET estado = 'completado', 
-                match_score = %s,
-                match_analisis = %s::jsonb
+                match_score = %s
             WHERE id = %s
-        """, (match_score, json.dumps(analisis_completo, ensure_ascii=False), postulacion_id))
+        """, (match_score, postulacion_id))
         conn.commit()
         conn.close()
         
         print(f"✅ [6/6] Postulación completada. Match score: {match_score}%")
-        print(f"✅ [6/6] Análisis detallado guardado en BD")
-        # Opcional: Enviar correo de confirmación
+        
+        # Enviar correo de confirmación
         try:
             enviar_correo_resultado_postulacion(email, nombre, match_score, postulacion_id)
         except Exception as e:
@@ -4697,7 +4779,6 @@ def procesar_postulacion_completa_background(postulacion_id, candidate_id, cv_pa
         import traceback
         traceback.print_exc()
         
-        # Marcar postulación como error
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -5241,14 +5322,13 @@ def api_mis_postulaciones():
 
 @app.route("/api/talento-general", methods=["POST"])
 def api_agregar_talento():
-    """Agrega un candidato a la base de talento general"""
     try:
         nombre = request.form.get('nombre')
         email = request.form.get('email')
         telefono = request.form.get('telefono')
         
         cv_filename = None
-        cv_analisis = '{}'
+        cv_temp_path = None
         
         if 'cv' in request.files:
             cv_file = request.files['cv']
@@ -5257,29 +5337,329 @@ def api_agregar_talento():
                 cv_filename = f"talento_{timestamp}_{secure_filename(cv_file.filename)}"
                 cv_path = os.path.join(UPLOAD_FOLDER, cv_filename)
                 cv_file.save(cv_path)
-                
-                text = extract_text(cv_path)
-                if text and len(text) > 50:
-                    data = analyze_cv(text, "gpt")
-                    data = normalize_lists(data)
-                    data = score_candidate(data)
-                    cv_analisis = json.dumps(data)
+                cv_temp_path = cv_path
+        
+        # 🔥 GUARDAR DATOS DEL FORMULARIO POR SEPARADO
+        datos_iniciales = {
+            "datos_crudos": {
+                "nombre": nombre,
+                "email": email,
+                "telefono": telefono
+            },
+            "formulario_original": {           # ← Backup de los datos del formulario
+                "nombre": nombre,
+                "email": email,
+                "telefono": telefono,
+                "fecha_registro": datetime.now().isoformat()
+            },
+            "archivo": cv_filename,
+            "estado_procesamiento": "pendiente"
+        }
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT agregar_talento_general(%s, %s, %s, %s, %s::jsonb)
-        """, (nombre, email, telefono, cv_filename, cv_analisis))
+        # Verificar si ya existe por email
+        candidate_id = None
+        if email:
+            cursor.execute("""
+                SELECT c.id FROM candidates c
+                WHERE c.raw_data::jsonb->'formulario_original'->>'email' = %s
+                LIMIT 1
+            """, (email,))
+            row = cursor.fetchone()
+            if row:
+                candidate_id = row[0]
         
-        result = cursor.fetchone()[0]
+        if not candidate_id:
+            cursor.execute("""
+                INSERT INTO candidates (archivo, nombre, raw_data, fecha_analisis, tags, fuente, fecha_carga)
+                VALUES (%s, %s, %s, NOW(), %s::text[], %s, %s)
+                RETURNING id
+            """, (cv_filename, nombre, json.dumps(datos_iniciales), [], "talento_general", datetime.now()))
+            candidate_id = cursor.fetchone()[0]
+        
         conn.commit()
         conn.close()
         
-        return jsonify(result)
+        # Procesar en segundo plano
+        import threading
+        thread = threading.Thread(
+            target=procesar_talento_background,
+            args=(candidate_id, cv_temp_path, email, nombre, telefono, cv_filename)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": "CV recibido. Estamos procesando tu información.",
+            "candidate_id": candidate_id
+        })
         
     except Exception as e:
+        print(f"❌ Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def procesar_talento_background(candidate_id, cv_path, email, nombre, telefono, cv_filename):
+    print("=" * 70)
+    print(f"🔥 [BACKGROUND] PROCESANDO TALENTO ID: {candidate_id}")
+    
+    try:
+        # Obtener los datos actuales del candidato (incluyendo formulario_original)
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT raw_data FROM candidates WHERE id = %s", (candidate_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        datos_actuales = row['raw_data'] if row else {}
+        if isinstance(datos_actuales, str):
+            datos_actuales = json.loads(datos_actuales)
+        
+        # 🔥 PRESERVAR DATOS DEL FORMULARIO ORIGINAL
+        formulario_original = datos_actuales.get('formulario_original', {
+            "nombre": nombre,
+            "email": email,
+            "telefono": telefono,
+            "fecha_registro": datetime.now().isoformat()
+        })
+        
+        # Extraer texto del CV
+        texto_cv = ""
+        if cv_path and os.path.exists(cv_path):
+            texto_cv = extract_text(cv_path)
+        
+        if texto_cv and len(texto_cv) > 100:
+            datos_ia = analyze_cv(texto_cv, "gpt")
+            datos_ia = normalize_lists(datos_ia)
+            datos_ia = score_candidate(datos_ia)
+            
+            # 🔥 COMBINAR: Datos del CV + Datos del formulario (el formulario tiene prioridad para ciertos campos)
+            datos_finales = {
+                "datos_crudos": {
+                    # Datos del CV (pueden ser más completos)
+                    **datos_ia.get('datos_crudos', {}),
+                    # 🔥 Los datos del formulario SOBREESCRIBEN a los del CV
+                    "nombre": formulario_original.get('nombre', nombre),
+                    "email": formulario_original.get('email', email),
+                    "telefono": formulario_original.get('telefono', telefono)
+                },
+                "interpretacion": datos_ia.get('interpretacion', {}),
+                "formulario_original": formulario_original,  # ← Backup preservado
+                "archivo": cv_filename,
+                "fecha_analisis": datetime.now().isoformat(),
+                "estado_procesamiento": "completado",
+                "texto_completo_cv": texto_cv
+            }
+        else:
+            # Si no se pudo analizar, usar solo los datos del formulario
+            datos_finales = {
+                "datos_crudos": {
+                    "nombre": formulario_original.get('nombre', nombre),
+                    "email": formulario_original.get('email', email),
+                    "telefono": formulario_original.get('telefono', telefono)
+                },
+                "formulario_original": formulario_original,
+                "archivo": cv_filename,
+                "estado_procesamiento": "sin_texto_suficiente",
+                "fecha_analisis": datetime.now().isoformat()
+            }
+        
+        # Extraer tags
+        tags = []
+        interp = datos_finales.get('interpretacion', {})
+        habilidades = interp.get('habilidades_clave', [])[:5]
+        seniority = interp.get('seniority', '')
+        sector = interp.get('sector_deducido', '')
+        
+        if habilidades:
+            tags.extend([h.lower() for h in habilidades])
+        if seniority:
+            tags.append(seniority.lower())
+        if sector:
+            tags.append(sector.lower())
+        tags = list(set(tags))
+        
+        # Actualizar candidato
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        nombre_final = datos_finales.get('datos_crudos', {}).get('nombre', nombre)
+        profesion = datos_finales.get('datos_crudos', {}).get('profesion_escrita', '')
+        score = datos_finales.get('score', 0)
+        
+        cursor.execute("""
+            UPDATE candidates 
+            SET raw_data = %s::jsonb, 
+                nombre = %s,
+                profesion = %s,
+                score = %s,
+                tags = %s::text[],
+                archivo = %s,
+                fecha_analisis = NOW()
+            WHERE id = %s
+        """, (
+            json.dumps(datos_finales, ensure_ascii=False),
+            nombre_final,
+            profesion,
+            score,
+            tags,
+            cv_filename,
+            candidate_id
+        ))
+        conn.commit()
+        conn.close()
+        
+        # Generar embedding
+        try:
+            generar_embedding_candidato(datos_finales, candidate_id)
+        except Exception as e:
+            print(f"⚠️ Error generando embedding: {e}")
+        
+        # Enviar correo
+        if email:
+            try:
+                enviar_correo_resultado_talento(email, nombre_final, candidate_id)
+            except Exception as e:
+                print(f"⚠️ Error enviando correo: {e}")
+        
+        print(f"✅ Talento procesado - ID: {candidate_id}")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def enviar_correo_resultado_talento(email, nombre, candidate_id):
+    """Envía correo de confirmación profesional al candidato de talento general"""
+    try:
+        from email_service import mailer
+        
+        subject = "📋 Tu perfil ha sido registrado - Talent Pipeline"
+        
+        body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    line-height: 1.6;
+                    color: #1e293b;
+                    margin: 0;
+                    padding: 0;
+                }}
+                .container {{
+                    max-width: 550px;
+                    margin: 0 auto;
+                    background: #ffffff;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                    padding: 32px 24px;
+                    text-align: center;
+                }}
+                .header h1 {{
+                    color: white;
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 600;
+                }}
+                .header p {{
+                    color: #94a3b8;
+                    margin: 8px 0 0;
+                }}
+                .content {{
+                    padding: 32px 24px;
+                    background: #ffffff;
+                }}
+                .success-icon {{
+                    text-align: center;
+                    font-size: 48px;
+                    margin-bottom: 24px;
+                }}
+                .info-box {{
+                    background: #f8fafc;
+                    border-left: 4px solid #10b981;
+                    padding: 20px;
+                    margin: 20px 0;
+                    border-radius: 8px;
+                }}
+                .footer {{
+                    background: #f8fafc;
+                    padding: 24px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #64748b;
+                    border-top: 1px solid #e2e8f0;
+                }}
+                hr {{
+                    border: none;
+                    border-top: 1px solid #e2e8f0;
+                    margin: 24px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🎯 Talent Pipeline</h1>
+                    <p>Sistema de Gestión de Talento</p>
+                </div>
+                
+                <div class="content">
+                    <div class="success-icon">✅</div>
+                    
+                    <h2 style="text-align: center; margin-bottom: 20px;">Estimado/a {nombre},</h2>
+                    
+                    <p>Le confirmamos que <strong>su perfil profesional ha sido registrado exitosamente</strong> en nuestra base de talento.</p>
+                    
+                    <div class="info-box">
+                        <p style="margin: 0 0 8px 0;"><strong>📋 Información del registro:</strong></p>
+                        <p style="margin: 4px 0;">• <strong>ID de referencia:</strong> {candidate_id}</p>
+                        <p style="margin: 4px 0;">• <strong>Fecha de registro:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
+                    </div>
+                    
+                    <p>Su información ha sido analizada y almacenada en nuestro sistema. Cuando surja una oportunidad laboral que se ajuste a su perfil, <strong>nuestro equipo se pondrá en contacto con usted</strong>.</p>
+                    
+                    <hr>
+                    
+                    <p style="color: #64748b; font-size: 13px;">
+                        <strong>📌 Importante:</strong><br>
+                        Mantenga actualizado su CV para recibir mejores oportunidades. Puede enviarnos una nueva versión cuando lo desee.
+                    </p>
+                    
+                    <p style="margin-top: 24px;">
+                        Agradecemos su interés en formar parte de nuestra red de talento.
+                    </p>
+                    
+                    <p style="margin-top: 24px;">
+                        Atentamente,<br>
+                        <strong>Equipo de Selección</strong><br>
+                        Talent Pipeline
+                    </p>
+                </div>
+                
+                <div class="footer">
+                    <p>© 2025 Talent Pipeline - Sistema de Gestión de Talento</p>
+                    <p>Este es un mensaje automático, por favor no responder directamente a este correo.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        result = mailer.send_email_sync(email, subject, body, is_html=True)
+        if result.get('success'):
+            print(f"📧 Correo de confirmación enviado a {email}")
+        else:
+            print(f"⚠️ Error enviando correo: {result.get('error')}")
+            
+    except Exception as e:
+        print(f"❌ Error enviando correo: {e}")
 
 
 @app.route("/api/calcular-match/<int:postulacion_id>", methods=["POST"])
@@ -7247,6 +7627,121 @@ def cancelar_entrevista(entrevista_id):
     except Exception as e:
         print(f"❌ Error cancelando entrevista: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+    
+@app.route("/api/candidates-with-tags", methods=["GET"])
+def api_get_candidates_with_tags():
+    """Obtiene candidatos con sus tags, fuente, fecha de carga y archivo"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # 🔥 AGREGAR archivo a la selección
+        cursor.execute("""
+            SELECT id, nombre, profesion, score, tags, fuente, fecha_carga, archivo, raw_data
+            FROM candidates 
+            ORDER BY fecha_carga DESC
+        """)
+        
+        candidatos = cursor.fetchall()
+        conn.close()
+        
+        return jsonify({"success": True, "data": candidatos})
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+
+@app.route("/api/candidates/filter-by-tags", methods=["POST"])
+def api_filter_by_tags():
+    """Filtra candidatos por tags"""
+    try:
+        data = request.json
+        tags = data.get('tags', [])
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        if tags:
+            # Buscar candidatos que tengan ALGUNA de las tags
+            cursor.execute("""
+                SELECT id, nombre, profesion, score, tags, fuente, fecha_carga, raw_data
+                FROM candidates 
+                WHERE tags && %s::text[]
+                ORDER BY fecha_carga DESC
+            """, (tags,))
+        else:
+            cursor.execute("""
+                SELECT id, nombre, profesion, score, tags, fuente, fecha_carga, raw_data
+                FROM candidates 
+                ORDER BY fecha_carga DESC
+            """)
+        
+        candidatos = cursor.fetchall()
+        conn.close()
+        
+        return jsonify({"success": True, "data": candidatos})
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500   
+
+@app.route("/api/candidate/<int:candidate_id>/tags", methods=["PUT"])
+def actualizar_tags_candidato(candidate_id):
+    """Actualiza los tags de un candidato manualmente"""
+    try:
+        data = request.json
+        tags = data.get('tags', [])
+        
+        # Limpiar tags (quitar espacios, convertir a minúsculas)
+        tags = [tag.lower().strip() for tag in tags if tag and tag.strip()]
+        tags = list(set(tags))  # Eliminar duplicados
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE candidates 
+            SET tags = %s::text[]
+            WHERE id = %s
+            RETURNING id
+        """, (tags, candidate_id))
+        
+        result = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        
+        if result:
+            return jsonify({"success": True, "tags": tags, "message": "Tags actualizados correctamente"})
+        else:
+            return jsonify({"success": False, "error": "Candidato no encontrado"}), 404
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    
+@app.route("/api/tags/sugerencias", methods=["GET"])
+def obtener_sugerencias_tags():
+    """Obtiene lista de tags ya usadas para sugerir"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT DISTINCT unnest(tags) as tag
+            FROM candidates
+            WHERE tags IS NOT NULL AND array_length(tags, 1) > 0
+            ORDER BY tag
+        """)
+        
+        tags = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        
+        return jsonify({"success": True, "tags": tags})
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500   
+
 
 # =====================================================
 # INICIO

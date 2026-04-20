@@ -15,6 +15,8 @@ const CandidatosPortal = () => {
   const [puestoSeleccionado, setPuestoSeleccionado] = useState(null);
   const [puestoDetalle, setPuestoDetalle] = useState(null);
   const [resultadoModal, setResultadoModal] = useState({ icono: '', titulo: '', mensaje: '' });
+  const [cargandoTalento, setCargandoTalento] = useState(false);
+  const [mensajeTalento, setMensajeTalento] = useState({ text: '', type: '' });
   const [filtros, setFiltros] = useState({
     search: '',
     cliente: '',
@@ -174,37 +176,43 @@ const CandidatosPortal = () => {
     e.preventDefault();
     const formData = new FormData(e.target);
     
+    // Mostrar mensaje de "cargando"
+    setCargandoTalento(true);
+    setMensajeTalento({ text: '🔄 Subiendo tu CV...', type: 'info' });
+    
     try {
-      const res = await axios.post(`${API_URL}/talento-general`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      
-      if (res.data.success) {
-        setModalTalentoAbierto(false);
-        setResultadoModal({
-          icono: '🌟',
-          titulo: '¡Registro exitoso!',
-          mensaje: 'Tu CV ha sido agregado a nuestra base de talento.'
+        const res = await axios.post(`${API_URL}/talento-general`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
-        setModalResultadoAbierto(true);
-        e.target.reset();
-      } else {
-        setResultadoModal({
-          icono: '❌',
-          titulo: 'Error',
-          mensaje: res.data.error
-        });
-        setModalResultadoAbierto(true);
-      }
+        
+        if (res.data.success) {
+            setModalTalentoAbierto(false);
+            setMensajeTalento({ text: '', type: '' });
+            setResultadoModal({
+                icono: '✅',
+                titulo: '¡CV Recibido!',
+                mensaje: res.data.message || 'Tu CV ha sido recibido. Te enviaremos un correo cuando el análisis esté completo.'
+            });
+            setModalResultadoAbierto(true);
+            e.target.reset();
+        } else {
+            setResultadoModal({
+                icono: '❌',
+                titulo: 'Error',
+                mensaje: res.data.error || 'Hubo un problema'
+            });
+            setModalResultadoAbierto(true);
+        }
     } catch (error) {
-      setResultadoModal({
-        icono: '❌',
-        titulo: 'Error',
-        mensaje: 'Error de conexión'
-      });
-      setModalResultadoAbierto(true);
+        setResultadoModal({
+            icono: '❌',
+            titulo: 'Error',
+            mensaje: 'Error de conexión con el servidor'
+        });
+        setModalResultadoAbierto(true);
     }
-  };
+    setCargandoTalento(false);
+};
 
   const cargarMisPostulaciones = async () => {
     if (!emailBuscar) {
@@ -594,7 +602,22 @@ const CandidatosPortal = () => {
                 <label style={{ fontSize: '13px', fontWeight: '500', marginBottom: '4px', display: 'block' }}>Adjuntar CV (opcional)</label>
                 <input type="file" name="cv" accept=".pdf,.docx" style={{ width: '100%' }} />
               </div>
-              <button type="submit" style={{ width: '100%', padding: '12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', fontWeight: '500' }}>Guardar en talento</button>
+              <button 
+    type="submit" 
+    disabled={cargandoTalento}
+    style={{ 
+        width: '100%', 
+        padding: '12px', 
+        background: cargandoTalento ? '#94a3b8' : '#10b981', 
+        color: 'white', 
+        border: 'none', 
+        borderRadius: '10px', 
+        cursor: cargandoTalento ? 'not-allowed' : 'pointer', 
+        fontWeight: '500' 
+    }}
+>
+    {cargandoTalento ? '⏳ Procesando...' : 'Guardar en talento'}
+</button>
             </form>
           </div>
         </div>
